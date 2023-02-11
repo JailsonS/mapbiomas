@@ -1,6 +1,7 @@
 import ee
 
-from utils.index import getNdfi, getFractions
+from ..modules.index import getFractions, getNdfi
+
 
 ee.Initialize()
 
@@ -119,24 +120,28 @@ def extractSamplesByPr(pr):
 
     return datasetSampleValues
 
-mapPr = map(lambda pr: extractSamplesByPr(pr), TEST_PR)
-
-dataset = ee.FeatureCollection(list(mapPr)).flatten()
-
 
 '''
-    Export data
+    trigger function main
 '''
-descriptionTest = 'lapig_samples_w_edge_amazonia_v1_test1'
 
-task = ee.batch.Export.table.toDrive(
-    description=descriptionTest,
-    collection=dataset,
-    fileFormat='CSV'
-)
+def run():
+    mapPr = map(lambda pr: extractSamplesByPr(pr), TEST_PR)
 
-task.start()
+    dataset = ee.FeatureCollection(list(mapPr)).flatten()
 
+    '''
+        Export data
+    '''
+    descriptionTest = 'lapig_samples_w_edge_amazonia_v1_test1'
+
+    task = ee.batch.Export.table.toDrive(
+        description=descriptionTest,
+        collection=dataset,
+        fileFormat='CSV'
+    )
+
+    task.start()
 
 
 
