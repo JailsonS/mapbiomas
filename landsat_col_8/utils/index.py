@@ -46,6 +46,3 @@ def getNdfi(image: ee.image.Image) -> ee.image.Image:
 
     return ee.Image(image)
 
-
-
-
