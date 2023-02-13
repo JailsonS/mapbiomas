@@ -1,7 +1,5 @@
 import ee
 
-from ..modules.index import getFractions, getNdfi
-
 ee.Initialize()
 
 
@@ -54,3 +52,6 @@ def run():
 
     taskTrain.start()
     taskTest.start()
+
+if __name__ == '__main__':
+    run()

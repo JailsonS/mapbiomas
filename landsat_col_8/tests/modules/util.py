@@ -1,3 +1,4 @@
+import ee
 def shuffle(collection, seed=1):
     """
     Adds a column of deterministic pseudorandom numbers to a collection.
