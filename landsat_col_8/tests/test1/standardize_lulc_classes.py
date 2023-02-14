@@ -133,6 +133,8 @@ def main():
         # standardize legend
         dfSamplesMelted = dfSamplesMelted.replace({'LEGEND_LAPIG': LEGEND_NAMES})
 
+        dfSamplesMelted = dfSamplesMelted.rename(columns={'LEGEND_LAPIG': 'LEGEND'})
+
         # export csv
         dfSamplesMelted.to_csv(OUTPUT_FILE)
         print('success')
