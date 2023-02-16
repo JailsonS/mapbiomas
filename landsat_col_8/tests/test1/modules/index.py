@@ -46,3 +46,10 @@ def getNdfi(image: ee.image.Image) -> ee.image.Image:
 
     return ee.Image(image)
 
+def getCsfi(image: ee.image.Image) -> ee.image.Image:
+    csfi = image.expression(
+        "(float(b('gv') - b('shade'))/(b('gv') + b('shade')))")
+
+    csfi = csfi.rename(['csfi'])
+
+    return image.addBands(csfi)

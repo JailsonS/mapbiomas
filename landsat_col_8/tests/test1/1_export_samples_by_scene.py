@@ -7,7 +7,9 @@ ee.Initialize()
     Config Data
 '''
 
-YEAR = '2022'
+YEARS = [
+    '2022'
+]
 
 ASSET_TRAIN_SAMPLES = 'projects/imazon-simex/LULC/COLLECTION8/SAMPLES/lapig_samples_w_edge_and_edited_amazonia_v1_train'
 
@@ -31,7 +33,7 @@ BANDS = ['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'QA_PIXEL', 'ST_B
 NEW_BAND_NAMES = ['blue','green','red','nir','swir1','swir2','pixel_qa','tir']
 
 SELECTORS = [
-    'PR', 'LANDSAT_SCENE_ID', 'blue','green','red','nir','swir1', 
+    'PR', 'LANDSAT_SCENE_ID', 'YEAR','blue','green','red','nir','swir1', 
     'ndfi', 'soil', 'gv', 'gvs', 'npv', 'cloud', 
     'CLASS_1985', 'CLASS_1986','CLASS_1987', 'CLASS_1988', 'CLASS_1989', 'CLASS_1990',
     'CLASS_1991', 'CLASS_1992','CLASS_1993', 'CLASS_1994', 'CLASS_1995', 'CLASS_1996',
@@ -39,7 +41,7 @@ SELECTORS = [
     'CLASS_2003', 'CLASS_2004','CLASS_2005', 'CLASS_2006','CLASS_2007', 'CLASS_2008',
     'CLASS_2009', 'CLASS_2010','CLASS_2011', 'CLASS_2012','CLASS_2013', 'CLASS_2014',
     'CLASS_2015', 'CLASS_2016','CLASS_2017', 'CLASS_2018','CLASS_2019', 'CLASS_2020',
-    'CLASS_2021', '.geom'
+    'CLASS_2021', '.geo'
 ]
 
 '''
@@ -126,49 +128,53 @@ def extractSamplesByPr(pr):
     
     center = ee.Feature(region.first()).centroid()
 
-    col8 = (ee.ImageCollection('LANDSAT/LC08/C02/T1_L2')
-        .filterBounds(center.geometry())
-        .filterDate(YEAR + '-01-01', YEAR + '-12-30')
-        .filter('CLOUD_COVER <= 50')
-        .map(lambda image: image.set('sensor', 'L8'))
-        .map(applyScaleFactorsL8L9)
-        .select(BANDS, NEW_BAND_NAMES)
-        .map(getFractions)
-        .map(getNdfi)
-    )
-
-    col9 = (ee.ImageCollection('LANDSAT/LC09/C02/T1_L2')
-        .filterBounds(center.geometry())
-        .filterDate(YEAR + '-01-01', YEAR + '-12-30')
-        .filter('CLOUD_COVER <= 50')
-        .map(lambda image: image.set('sensor', 'L8'))
-        .map(applyScaleFactorsL8L9)
-        .select(BANDS, NEW_BAND_NAMES)
-        .map(getFractions)
-        .map(getNdfi)
-    )
-
-    collection = col8.merge(col9).map(removeCloudShadow)
-
-    listIdScene = collection.reduceColumns(ee.Reducer.toList(), ['LANDSAT_SCENE_ID']).get('list').getInfo()
     listSceneData = []
 
-    for idScene in listIdScene:
+    for y in YEARS:
 
-        currentScene = ee.Image(collection.filter(ee.Filter.eq('LANDSAT_SCENE_ID', idScene)).first())
-
-        sampleValues = currentScene.sampleRegions(
-            collection=samplesDataset,  
-            scale=30, 
-            geometries=True
+        col8 = (ee.ImageCollection('LANDSAT/LC08/C02/T1_L2')
+            .filterBounds(center.geometry())
+            .filterDate(y + '-01-01', y + '-12-30')
+            .filter('CLOUD_COVER <= 50')
+            .map(lambda image: image.set('sensor', 'L8'))
+            .map(applyScaleFactorsL8L9)
+            .select(BANDS, NEW_BAND_NAMES)
+            .map(getFractions)
+            .map(getNdfi)
         )
 
-        sampleValues = sampleValues\
-            .map(lambda feat: feat.set('LANDSAT_SCENE_ID', idScene))\
-            .map(lambda feat: feat.set('PR', pr))
+        col9 = (ee.ImageCollection('LANDSAT/LC09/C02/T1_L2')
+            .filterBounds(center.geometry())
+            .filterDate(y + '-01-01', y + '-12-30')
+            .filter('CLOUD_COVER <= 50')
+            .map(lambda image: image.set('sensor', 'L8'))
+            .map(applyScaleFactorsL8L9)
+            .select(BANDS, NEW_BAND_NAMES)
+            .map(getFractions)
+            .map(getNdfi)
+        )
+
+        collection = col8.merge(col9).map(removeCloudShadow)
+
+        listIdScene = collection.reduceColumns(ee.Reducer.toList(), ['LANDSAT_SCENE_ID']).get('list').getInfo()
+
+        for idScene in listIdScene:
+
+            currentScene = ee.Image(collection.filter(ee.Filter.eq('LANDSAT_SCENE_ID', idScene)).first())
+
+            sampleValues = currentScene.sampleRegions(
+                collection=samplesDataset,  
+                scale=30, 
+                geometries=True
+            )
+
+            sampleValues = sampleValues\
+                .map(lambda feat: feat.set('LANDSAT_SCENE_ID', idScene))\
+                .map(lambda feat: feat.set('PR', pr))\
+                .map(lambda feat: feat.set('YEAR', y))
 
 
-        listSceneData.append(sampleValues)
+            listSceneData.append(sampleValues)
 
     datasetSampleValues = ee.FeatureCollection(listSceneData).flatten()
 
@@ -180,6 +186,8 @@ def extractSamplesByPr(pr):
 '''
 
 def run():
+
+
     mapPr = map(lambda pr: extractSamplesByPr(pr), TEST_PR)
 
     dataset = ee.FeatureCollection(list(mapPr)).flatten()
@@ -193,7 +201,8 @@ def run():
         description=descriptionTest,
         collection=dataset,
         fileFormat='CSV',
-        selectors=SELECTORS
+        selectors=SELECTORS,
+        folder='MAPBIOMAS_EXPORTS'
     )
 
     task.start()
