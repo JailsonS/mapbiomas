@@ -31,8 +31,12 @@ ASSET_BIOMES = 'projects/mapbiomas-workspace/AUXILIAR/biomas-2019'
 
 # google drive api
 SCOPES = ['https://www.googleapis.com/auth/drive']
-
 URL_TOKEN = 'https://oauth2.googleapis.com/token'
+
+
+
+# table of reference
+REF_AREA = os.path.abspath('./landsat_col_8/tests/test1/data/areas.csv')
 
 
 
@@ -77,7 +81,7 @@ FIELDS = [
 
 
 
-
+# model parameters
 RF_PARAMS = {
     'numberOfTrees': 50,
     # 'variablesPerSplit': 4,
@@ -88,8 +92,17 @@ FEAT_SPACE_BANDS = ["gv", "gvs", "soil", "npv", "shade", "ndfi", "csfi"]
     
 
 
+# sample balance
+PROPORTION_SAMPLES = {
+
+}
 
 
+
+
+
+
+# run params
 YEARS = [
     '2022'
 ]
@@ -162,6 +175,11 @@ def getFile(creds):
 
     return pd.read_csv(io.StringIO(res.text))
 
+def calculateAreaPercentage(table: pd.DataFrame, pr:float, year: int) -> pd.DataFrame:
+    tablePerc = table.query("year == {} & tile == {}".format(year, pr))
+    tablePerc['area_percent'] = (tablePerc['area'] / tablePerc['area'].sum()) * 100
+    return tablePerc
+
 
 '''
     Normalize function
@@ -186,16 +204,39 @@ def getNormalizedSamples(file):
     return ee.FeatureCollection(listOfSamples)
 
 
-def genSupportSamples(idLandsatScene, samples, year):
+def genSupportSamples(idScenePr, samples, year):
+
+    y = int(year) - 1 if year == '2022' else int(year)
+
+    # get proportion samples
+    # ------------------------------------------------------------------------
+    # table area - used to stimate the proportion of land use area for each PR
+    referenceTable = pd.read_csv(REF_AREA)
+    referenceTable = calculateAreaPercentage(referenceTable, float(idScenePr[1]), y)
+
+    print(referenceTable.head())
     
-    sensor = idLandsatScene[:3]
+    #return referenceTable
+
+    '''
+    proportion = referenceTable.query()
+
+
+    
+
+
+
+    sensor = prAndIdScene[0][:3]
     
     image = None
 
+
+
+
     if sensor == 'LC8':
-        image = ee.Image('LANDSAT/LC08/C02/T1_L2/{}'.format(idLandsatScene))
+        image = ee.Image('LANDSAT/LC08/C02/T1_L2/{}'.format(prAndIdScene[1]))
     if sensor == 'LC9':
-        image = ee.Image('LANDSAT/LC09/C02/T1_L2/{}'.format(idLandsatScene))
+        image = ee.Image('LANDSAT/LC09/C02/T1_L2/{}'.format(prAndIdScene[1]))
 
     image = applyScaleFactorsL8L9(image)
     image = image.select(BANDS, NEW_BAND_NAMES)
@@ -203,13 +244,23 @@ def genSupportSamples(idLandsatScene, samples, year):
     image = getNdfi(image)
     image = getCsfi(image)
 
+
+    # random samples
+    randomPoints = ee.FeatureCollection.randomPoints(*{
+        'region': image.geometry(), 
+        'points': 1000
+    })
+
     # create model
     model = ee.Classifier.smileRandomForest(RF_PARAMS)\
         .train(samples, 'label_' + year, FEAT_SPACE_BANDS)
 
 
 
+
     return image
+    '''
+
 
 
 
@@ -228,11 +279,26 @@ if __name__ == '__main__':
         # iterate over years
         for yearClas in YEARS:
 
-            fileYear = file.query('YEAR == "{}"'.format(yearClas))
+            fileYear = file.query('YEAR == {}'.format(yearClas))
 
             idScenes = list(fileYear['LANDSAT_SCENE_ID'].drop_duplicates().values)
+            prList = list(fileYear['PR'].drop_duplicates().values)
+
+            idScenePr = list(zip(idScenes, prList))
 
             samples = getNormalizedSamples(fileYear)
+
+            mapPrAndScene = map(lambda tupleIdAndPr: genSupportSamples(tupleIdAndPr, samples, yearClas), idScenePr)
+
+            res = list(mapPrAndScene)
+            
+
+
+
+
+
+
+
 
 
 
