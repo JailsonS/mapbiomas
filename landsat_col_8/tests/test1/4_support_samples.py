@@ -7,7 +7,7 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
 import os.path
-import sys, os, pprint, re, io
+import os, io
 import requests, json
 import pandas as pd
 
@@ -26,10 +26,16 @@ ASSET_PR = 'projects/mapbiomas-workspace/AUXILIAR/landsat-scenes'
 ASSET_BIOMES = 'projects/mapbiomas-workspace/AUXILIAR/biomas-2019'
 
 
+
+
+
 # google drive api
 SCOPES = ['https://www.googleapis.com/auth/drive']
 
 URL_TOKEN = 'https://oauth2.googleapis.com/token'
+
+
+
 
 # normalize names
 BANDS = ['SR_B2', 'SR_B3', 'SR_B4', 'SR_B5', 'SR_B6', 'SR_B7', 'QA_PIXEL', 'ST_B10']
@@ -69,6 +75,9 @@ FIELDS = [
 ]
 
 
+
+
+
 RF_PARAMS = {
     'numberOfTrees': 50,
     # 'variablesPerSplit': 4,
@@ -77,6 +86,10 @@ RF_PARAMS = {
 
 FEAT_SPACE_BANDS = ["gv", "gvs", "soil", "npv", "shade", "ndfi", "csfi"]
     
+
+
+
+
 YEARS = [
     '2022'
 ]
@@ -220,6 +233,8 @@ if __name__ == '__main__':
             idScenes = list(fileYear['LANDSAT_SCENE_ID'].drop_duplicates().values)
 
             samples = getNormalizedSamples(fileYear)
+
+
 
         
 
