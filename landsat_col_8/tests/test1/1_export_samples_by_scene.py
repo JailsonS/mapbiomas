@@ -39,7 +39,7 @@ SELECTORS = [
     'CLASS_2003', 'CLASS_2004','CLASS_2005', 'CLASS_2006','CLASS_2007', 'CLASS_2008',
     'CLASS_2009', 'CLASS_2010','CLASS_2011', 'CLASS_2012','CLASS_2013', 'CLASS_2014',
     'CLASS_2015', 'CLASS_2016','CLASS_2017', 'CLASS_2018','CLASS_2019', 'CLASS_2020',
-    'CLASS_2021'
+    'CLASS_2021', '.geom'
 ]
 
 '''
@@ -160,7 +160,7 @@ def extractSamplesByPr(pr):
         sampleValues = currentScene.sampleRegions(
             collection=samplesDataset,  
             scale=30, 
-            geometries=False
+            geometries=True
         )
 
         sampleValues = sampleValues\
