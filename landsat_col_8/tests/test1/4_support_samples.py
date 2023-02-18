@@ -7,8 +7,8 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
 import os.path
-import os, io
-import requests, json
+import os, io, pprint
+import requests, json, random
 import pandas as pd
 
 from modules.index import getFractions, getNdfi, getCsfi
@@ -20,11 +20,17 @@ ee.Initialize()
     Config Session
 '''
 
+# output info
+OUTPUT = 'users/jailson/mapbiomas/samples'
+VERSION = '1'
+
+
+
 # assets
 ASSET_TRAIN_SAMPLES = 'projects/imazon-simex/LULC/COLLECTION8/SAMPLES/lapig_samples_w_edge_and_edited_amazonia_v1_train'
 ASSET_PR = 'projects/mapbiomas-workspace/AUXILIAR/landsat-scenes'
 ASSET_BIOMES = 'projects/mapbiomas-workspace/AUXILIAR/biomas-2019'
-
+ASSET_TILES = 'projects/mapbiomas-workspace/AUXILIAR/landsat-mask'
 
 
 
@@ -36,7 +42,7 @@ URL_TOKEN = 'https://oauth2.googleapis.com/token'
 
 
 # table of reference
-REF_AREA = os.path.abspath('./landsat_col_8/tests/test1/data/areas.csv')
+REF_AREA = os.path.abspath('./landsat_col_8/tests/test1/data/areas_c71.csv')
 
 
 
@@ -47,25 +53,25 @@ NEW_BAND_NAMES = ['blue','green','red','nir','swir1','swir2','pixel_qa','tir']
 
 LEGEND_NAMES = {
     'CANA': 18,
-    'LAVOURA TEMPORÁRIA': 18,
-    'APICUM': 32,
+    'LAVOURA TEMPORÁRIA': 18, 
+    'APICUM': 32, 
     'NÃO OBSERVADO': 27,
-    'MANGUE': 5,
+    'MANGUE': 3, # mangue[5] -> floresta[3]
     'RIO, LAGO E OCEANO': 33,
     'OUTRA ÁREA NÃO VEGETADA': 25,
     'PASTAGEM': 15,
     'FORMAÇÃO FLORESTAL': 3,
     'LAVOURA PERENE': 18,
-    'SILVICULTURA': 18,
-    'INFRAESTRUTURA URBANA': 24,
+    'SILVICULTURA': 3, # sivicultura[9] -> floresta[3]
+    'INFRAESTRUTURA URBANA': 25, # infra urbana[24] -> outra área não vegetada[25]
     'FORMAÇÃO CAMPESTRE': 12,
-    'MINERAÇÃO': 30,
-    'FLORESTA INUNDÁVEL': 100,
-    'AQUICULTURA': 31,
+    'MINERAÇÃO': 25, # mineração[30] -> outra área não vegetada[25]
+    'FLORESTA INUNDÁVEL': 3, # floresta inundável[x] -> floresta[3]
+    'AQUICULTURA': 33, # aquicultura[x] -> água[33]
     'FORMAÇÃO SAVÂNICA': 4,
-    'VEGETAÇÃO URBANA': 101,
+    'VEGETAÇÃO URBANA': 25,
     'CAMPO ALAGADO E ÁREA PANTANOSA': 11,
-    'AFLORAMENTO ROCHOSO': 29
+    'AFLORAMENTO ROCHOSO': 25 # afloramento rochoso[29] -> outra área não vegetada[25]
 }
 
 FIELDS = [
@@ -88,15 +94,23 @@ RF_PARAMS = {
     # 'minLeafPopulation': 25
 }
 
-FEAT_SPACE_BANDS = ["gv", "gvs", "soil", "npv", "shade", "ndfi", "csfi"]
+FEAT_SPACE_BANDS = ["gv", "gvs", "soil", "npv", "ndfi"]
     
 
 
 # sample balance
-PROPORTION_SAMPLES = {
+N_SAMPLES = 2000
 
-}
-
+PROPORTION_SAMPLES = pd.DataFrame([
+    {'class':  3, 'min_samples': N_SAMPLES * 0.40, 'proportion': 0.40},
+    {'class':  4, 'min_samples': N_SAMPLES * 0.05, 'proportion': 0.05},
+    {'class': 12, 'min_samples': N_SAMPLES * 0.05, 'proportion': 0.05},
+    {'class': 15, 'min_samples': N_SAMPLES * 0.23, 'proportion': 0.25},
+    {'class': 18, 'min_samples': N_SAMPLES * 0.10, 'proportion': 0.10},
+    #{'class': 11, 'min_samples': N_SAMPLES * 0.05, 'proportion': 0.05},
+    {'class': 33, 'min_samples': N_SAMPLES * 0.10, 'proportion': 0.10},
+    {'class': 25, 'min_samples': N_SAMPLES * 0.02, 'proportion': 0.05},
+])
 
 
 
@@ -175,15 +189,25 @@ def getFile(creds):
 
     return pd.read_csv(io.StringIO(res.text))
 
-def calculateAreaPercentage(table: pd.DataFrame, pr:float, year: int) -> pd.DataFrame:
-    tablePerc = table.query("year == {} & tile == {}".format(year, pr))
-    tablePerc['area_percent'] = (tablePerc['area'] / tablePerc['area'].sum()) * 100
-    return tablePerc
+def getProportionTable(table: pd.DataFrame, tile: int, year: int) -> pd.DataFrame:
+    
+    tablePerc = table.query("year == {} & tile == {}".format(year, tile))
+    
+    tablePerc['area_ha'] = (tablePerc['area_ha']).astype(float).round(decimals=4)
+    tablePerc['area_percent'] = (tablePerc['area_ha'] / tablePerc['area_ha'].sum()).round(decimals=4)
+    tablePerc['n_samples'] = tablePerc['area_percent'].mul(N_SAMPLES).round().astype(int)
 
 
-'''
-    Normalize function
-'''
+    # join ref area with proportion
+    df = pd.merge(tablePerc, PROPORTION_SAMPLES, how="outer", on="class")
+    
+    # compare to min samples: rule (min_samples > n_samples = min_samples)
+    df.loc[df['min_samples'] > df['n_samples'], 'n_samples'] = df['min_samples']
+    df = df.replace(float("NaN"), 0)
+
+    return df
+
+
 def getNormalizedSamples(file):
 
     listOfSamples = []
@@ -199,67 +223,34 @@ def getNormalizedSamples(file):
             y = str(year.replace('CLASS_',''))
             feat = feat.set('label_' + y, LEGEND_NAMES[row[year]])
 
+        for band in FEAT_SPACE_BANDS:
+            feat = feat.set(band, row[band])
+
         listOfSamples.append(feat)
 
     return ee.FeatureCollection(listOfSamples)
 
 
-def genSupportSamples(idScenePr, samples, year):
+def getReferenceAreaTable(tile, year):
+   
+    referenceTable = pd.read_csv(REF_AREA)[['tile', 'year','class', 'area_ha']]
 
-    y = int(year) - 1 if year == '2022' else int(year)
+    # normalize classes
+    referenceTable = referenceTable.replace({'class': {
+        9:3,
+        30:25,
+        50:3,
+        19:18,
+        32:18,
+        20:18,
+        41:18,
+        11:12
+    }}).groupby(by=['tile', 'year','class']).sum().reset_index()
 
-    # get proportion samples
-    # ------------------------------------------------------------------------
-    # table area - used to stimate the proportion of land use area for each PR
-    referenceTable = pd.read_csv(REF_AREA)
-    referenceTable = calculateAreaPercentage(referenceTable, float(idScenePr[1]), y)
+    referenceTable = getProportionTable(referenceTable, int(tile), int(year))
 
-    print(referenceTable.head())
-    
-    #return referenceTable
+    return referenceTable
 
-    '''
-    proportion = referenceTable.query()
-
-
-    
-
-
-
-    sensor = prAndIdScene[0][:3]
-    
-    image = None
-
-
-
-
-    if sensor == 'LC8':
-        image = ee.Image('LANDSAT/LC08/C02/T1_L2/{}'.format(prAndIdScene[1]))
-    if sensor == 'LC9':
-        image = ee.Image('LANDSAT/LC09/C02/T1_L2/{}'.format(prAndIdScene[1]))
-
-    image = applyScaleFactorsL8L9(image)
-    image = image.select(BANDS, NEW_BAND_NAMES)
-    image = getFractions(image)
-    image = getNdfi(image)
-    image = getCsfi(image)
-
-
-    # random samples
-    randomPoints = ee.FeatureCollection.randomPoints(*{
-        'region': image.geometry(), 
-        'points': 1000
-    })
-
-    # create model
-    model = ee.Classifier.smileRandomForest(RF_PARAMS)\
-        .train(samples, 'label_' + year, FEAT_SPACE_BANDS)
-
-
-
-
-    return image
-    '''
 
 
 
@@ -276,23 +267,131 @@ if __name__ == '__main__':
         # get sample file
         file = getFile(cred)
 
+        # tiles collection
+        tilesCollection = ee.ImageCollection(ASSET_TILES)
+
+
         # iterate over years
-        for yearClas in YEARS:
+        for year in YEARS:
 
-            fileYear = file.query('YEAR == {}'.format(yearClas))
+            y = int(year) - 1 if year == '2022' else int(year)
+            label = 'label_' + str(y)
+    
 
-            idScenes = list(fileYear['LANDSAT_SCENE_ID'].drop_duplicates().values)
+            fileYear = file.query('YEAR == {}'.format(year))
+
             prList = list(fileYear['PR'].drop_duplicates().values)
 
-            idScenePr = list(zip(idScenes, prList))
-
-            samples = getNormalizedSamples(fileYear)
-
-            mapPrAndScene = map(lambda tupleIdAndPr: genSupportSamples(tupleIdAndPr, samples, yearClas), idScenePr)
-
-            res = list(mapPrAndScene)
             
+            for tile in prList:
 
+                listSupportSamples = []
+
+                fileSamplesTile = fileYear.query('PR == {}'.format(tile))
+
+                tilesCollectionTile = tilesCollection.filter(ee.Filter.eq('tile', int(tile)))
+                tileMask = ee.Image(tilesCollectionTile.first())
+
+                geometry = tileMask.geometry()
+                region = geometry.getInfo()['coordinates']
+
+                listIdImages = fileSamplesTile['LANDSAT_SCENE_ID'].drop_duplicates().values
+
+                for idImg in listIdImages:
+                    
+                    fileImageSamples = fileSamplesTile.query('LANDSAT_SCENE_ID == "{}"'.format(idImg))
+
+                    samplesRandomImages = random.choices(listIdImages, k=5)
+                    fileRandomImage = fileSamplesTile.loc[fileSamplesTile['LANDSAT_SCENE_ID'].isin(samplesRandomImages)]
+
+
+                    samplesTileImage = getNormalizedSamples(fileImageSamples)
+                    samplesRandomImages = getNormalizedSamples(fileRandomImage)
+
+                    allSamples = samplesRandomImages.merge(samplesTileImage)
+
+
+                    # get reference table
+                    refTableArea = getReferenceAreaTable(tile, y)
+
+                    #pprint.pprint(refTableArea.head())
+
+                    #pprint.pprint(allSamples.first().getInfo())
+
+                    # filter samples according balance samples
+                    refTableArea['samples_gee'] = refTableArea.apply(
+                        lambda serie: allSamples.filter(ee.Filter.eq(label, serie['class'])).limit(serie['n_samples']),
+                        axis=1
+                    )
+
+                    # get trainning samples
+                    trainingSamples = ee.FeatureCollection(list(refTableArea['samples_gee'].values)).flatten()
+
+                    trainingSamples = trainingSamples.select(FEAT_SPACE_BANDS + [label])
+
+
+
+                    sensor = idImg[:3]
+
+ 
+                    image = None
+
+                    if sensor == 'LC8':
+                        image = ee.Image(
+                            ee.ImageCollection('LANDSAT/LC08/C02/T1_L2')\
+                                .filter(ee.Filter.eq('LANDSAT_SCENE_ID', idImg)).first()
+                        )
+                        
+                    if sensor == 'LC9':
+                        image = ee.Image(
+                            ee.ImageCollection('LANDSAT/LC09/C02/T1_L2')\
+                                .filter(ee.Filter.eq('LANDSAT_SCENE_ID', idImg)).first()
+                        )
+
+                    image = ee.Image(applyScaleFactorsL8L9(image))
+                    image = image.select(BANDS, NEW_BAND_NAMES)
+                    image = getFractions(image)
+                    image = getNdfi(image)
+                    image = getCsfi(image)
+
+
+                    # random samples
+                    randomPoints = ee.FeatureCollection.randomPoints(
+                        region=image.geometry(), 
+                        points=1000
+                    )
+
+                    # train random samples
+                    randomPointsTrain = image.sampleRegions(
+                        collection=randomPoints,
+                        scale=30,
+                        geometries=True,
+                        properties=FEAT_SPACE_BANDS
+                    )
+
+                    # create model
+                    model = ee.Classifier.smileRandomForest(**RF_PARAMS)\
+                        .train(trainingSamples, label, FEAT_SPACE_BANDS)
+
+
+                    supportSamples = randomPointsTrain.classify(model)
+
+                    listSupportSamples.append(supportSamples)
+
+                allSupportSamples = ee.FeatureCollection(listSupportSamples).flatten()
+                
+                description = 'support_samples_{}_{}_{}'.format(str(year), str(tile), VERSION)
+
+                print(description)
+
+                task = ee.batch.Export.table.toAsset(
+                    collection=allSupportSamples,
+                    assetId='{}/support_samples_{}_{}_{}'.format(OUTPUT, str(year), str(tile),VERSION),
+                    description=description
+                )
+
+                task.start()
+      
 
 
 
