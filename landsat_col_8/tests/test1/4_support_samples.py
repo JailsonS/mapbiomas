@@ -21,7 +21,7 @@ ee.Initialize()
 '''
 
 # output info
-OUTPUT = 'users/jailson/mapbiomas/samples'
+OUTPUT = './landsat_col_8/tests/test1/data/support_samples/{}'
 VERSION = '1'
 
 
@@ -43,10 +43,6 @@ URL_TOKEN = 'https://oauth2.googleapis.com/token'
 
 # table of reference
 REF_AREA = os.path.abspath('./landsat_col_8/tests/test1/data/areas_c71.csv')
-
-# random points
-PTS_FILE = os.path.abspath('./landsat_col_8/tests/test1/data/random_points.csv')
-
 
 
 # normalize names
@@ -129,8 +125,8 @@ TEST_PR = [
   # "228061",
   # "223062",
   # "227062",
-  "224066",
-  "225066",
+  #"224066",
+  #"225066",
   "224068",
   "231069",
   "230069"
@@ -277,12 +273,25 @@ if __name__ == '__main__':
         for year in YEARS:
 
             y = int(year) - 1 if year == '2022' else int(year)
+
             label = 'label_' + str(y)
-    
 
             fileYear = file.query('YEAR == {}'.format(year))
 
             prList = TEST_PR # list(fileYear['PR'].drop_duplicates().values)
+
+            dfSupportSamplesAll = pd.DataFrame({
+                'gv': [],
+                'gvs': [],
+                'soil': [],
+                'npv': [],
+                'ndfi': [],
+                'csfi': [],
+                'classification': [],
+                'tile': [],
+                'landsat_id_scene': [],
+                'year': []
+            })
 
             for tile in prList:
 
@@ -300,8 +309,6 @@ if __name__ == '__main__':
                     region=geometry, 
                     points=1000
                 )
-
-                pprint.pprint(len(listIdImages))
                 
                 for idImg in listIdImages:
                     
@@ -382,10 +389,17 @@ if __name__ == '__main__':
 
                     dfSupportSamples['tile'] = tile
                     dfSupportSamples['landsat_id_scene'] = idImg
+                    dfSupportSamples['year'] = year
+
+                    dfSupportSamplesAll = pd.concat([dfSupportSamplesAll, dfSupportSamples])
 
 
                 
-                description = 'support_samples_{}_{}_{}'.format(str(year), str(tile), VERSION)
+                description = 'support_samples_{}_{}_{}.csv'.format(str(year), str(tile), VERSION)
+
+                print(description)
+
+                dfSupportSamplesAll.to_csv(os.path.abspath(OUTPUT.format(description)))
 
 
 
