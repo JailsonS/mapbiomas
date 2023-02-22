@@ -44,6 +44,8 @@ URL_TOKEN = 'https://oauth2.googleapis.com/token'
 # table of reference
 REF_AREA = os.path.abspath('./landsat_col_8/tests/test1/data/areas_c71.csv')
 
+# random points
+PTS_FILE = os.path.abspath('./landsat_col_8/tests/test1/data/random_points.csv')
 
 
 
@@ -94,7 +96,7 @@ RF_PARAMS = {
     # 'minLeafPopulation': 25
 }
 
-FEAT_SPACE_BANDS = ["gv", "gvs", "soil", "npv", "ndfi"]
+FEAT_SPACE_BANDS = ["gv", "gvs", "soil", "npv", "ndfi", "csfi"]
     
 
 
@@ -122,11 +124,11 @@ YEARS = [
 ]
 
 TEST_PR = [
-  "225060",
-  "224060",
-  "228061",
-  "223062",
-  "227062",
+  # "225060",
+  # "224060",
+  # "228061",
+  # "223062",
+  # "227062",
   "224066",
   "225066",
   "224068",
@@ -188,6 +190,7 @@ def getFile(creds):
     res.encoding = 'utf-8'
 
     return pd.read_csv(io.StringIO(res.text))
+
 
 def getProportionTable(table: pd.DataFrame, tile: int, year: int) -> pd.DataFrame:
     
@@ -254,7 +257,6 @@ def getReferenceAreaTable(tile, year):
 
 
 
-
 '''
     Main function
 '''
@@ -280,12 +282,9 @@ if __name__ == '__main__':
 
             fileYear = file.query('YEAR == {}'.format(year))
 
-            prList = list(fileYear['PR'].drop_duplicates().values)
+            prList = TEST_PR # list(fileYear['PR'].drop_duplicates().values)
 
-            
             for tile in prList:
-
-                listSupportSamples = []
 
                 fileSamplesTile = fileYear.query('PR == {}'.format(tile))
 
@@ -293,10 +292,17 @@ if __name__ == '__main__':
                 tileMask = ee.Image(tilesCollectionTile.first())
 
                 geometry = tileMask.geometry()
-                region = geometry.getInfo()['coordinates']
 
                 listIdImages = fileSamplesTile['LANDSAT_SCENE_ID'].drop_duplicates().values
+                
+                # random samples
+                randomPoints = ee.FeatureCollection.randomPoints(
+                    region=geometry, 
+                    points=1000
+                )
 
+                pprint.pprint(len(listIdImages))
+                
                 for idImg in listIdImages:
                     
                     fileImageSamples = fileSamplesTile.query('LANDSAT_SCENE_ID == "{}"'.format(idImg))
@@ -314,10 +320,6 @@ if __name__ == '__main__':
                     # get reference table
                     refTableArea = getReferenceAreaTable(tile, y)
 
-                    #pprint.pprint(refTableArea.head())
-
-                    #pprint.pprint(allSamples.first().getInfo())
-
                     # filter samples according balance samples
                     refTableArea['samples_gee'] = refTableArea.apply(
                         lambda serie: allSamples.filter(ee.Filter.eq(label, serie['class'])).limit(serie['n_samples']),
@@ -329,11 +331,8 @@ if __name__ == '__main__':
 
                     trainingSamples = trainingSamples.select(FEAT_SPACE_BANDS + [label])
 
-
-
                     sensor = idImg[:3]
 
- 
                     image = None
 
                     if sensor == 'LC8':
@@ -348,50 +347,47 @@ if __name__ == '__main__':
                                 .filter(ee.Filter.eq('LANDSAT_SCENE_ID', idImg)).first()
                         )
 
-                    image = ee.Image(applyScaleFactorsL8L9(image))
+                    image = applyScaleFactorsL8L9(image)
                     image = image.select(BANDS, NEW_BAND_NAMES)
-                    image = getFractions(image)
+                    image = ee.Image(getFractions(image)).select(['gv', 'npv', 'soil', 'cloud', 'shade', 'pixel_qa'])
                     image = getNdfi(image)
                     image = getCsfi(image)
+                    image = removeCloudShadow(image)
+                    image = image.select(FEAT_SPACE_BANDS)
 
-
-                    # random samples
-                    randomPoints = ee.FeatureCollection.randomPoints(
-                        region=image.geometry(), 
-                        points=1000
-                    )
 
                     # train random samples
                     randomPointsTrain = image.sampleRegions(
-                        collection=randomPoints,
-                        scale=30,
-                        geometries=True,
-                        properties=FEAT_SPACE_BANDS
+                        collection=randomPoints,  
+                        scale=30, 
+                        geometries=True
                     )
 
                     # create model
                     model = ee.Classifier.smileRandomForest(**RF_PARAMS)\
                         .train(trainingSamples, label, FEAT_SPACE_BANDS)
 
-
                     supportSamples = randomPointsTrain.classify(model)
 
-                    listSupportSamples.append(supportSamples)
+                    urlSamples = supportSamples.getDownloadURL(
+                        selectors=FEAT_SPACE_BANDS + ['classification']
+                    )
 
-                allSupportSamples = ee.FeatureCollection(listSupportSamples).flatten()
+                    r = requests.get(urlSamples, stream=True)
+
+                    if r.status_code != 200:
+                        r.raise_for_status()
+
+                    dfSupportSamples = pd.read_csv(io.StringIO(r.content.decode('utf-8')))
+
+                    dfSupportSamples['tile'] = tile
+                    dfSupportSamples['landsat_id_scene'] = idImg
+
+
                 
                 description = 'support_samples_{}_{}_{}'.format(str(year), str(tile), VERSION)
 
-                print(description)
 
-                task = ee.batch.Export.table.toAsset(
-                    collection=allSupportSamples,
-                    assetId='{}/support_samples_{}_{}_{}'.format(OUTPUT, str(year), str(tile),VERSION),
-                    description=description
-                )
-
-                task.start()
-      
 
 
 

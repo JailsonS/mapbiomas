@@ -13,7 +13,7 @@ def getFractions(image: ee.image.Image) -> ee.image.Image:
     outBandNames = ['gv', 'npv', 'soil', 'cloud']
     
     
-    fractions = ee.Image(image).select(['blue', 'green', 'red', 'nir', 'swir1', 'swir2'])\
+    fractions = image.select(['blue', 'green', 'red', 'nir', 'swir1', 'swir2'])\
         .unmix(ENDMEMBERS)\
         .max(0)
 
@@ -27,7 +27,6 @@ def getFractions(image: ee.image.Image) -> ee.image.Image:
     fractions = fractions.addBands(shade)
 
     return image.addBands(fractions)
-
 
 def getNdfi(image: ee.image.Image) -> ee.image.Image:
 
@@ -44,7 +43,7 @@ def getNdfi(image: ee.image.Image) -> ee.image.Image:
     image = image.addBands(gvs)
     image = image.addBands(ndfi)
 
-    return ee.Image(image)
+    return image
 
 def getCsfi(image: ee.image.Image) -> ee.image.Image:
     csfi = image.expression(

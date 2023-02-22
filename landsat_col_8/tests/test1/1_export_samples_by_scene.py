@@ -34,7 +34,7 @@ NEW_BAND_NAMES = ['blue','green','red','nir','swir1','swir2','pixel_qa','tir']
 
 SELECTORS = [
     'PR', 'LANDSAT_SCENE_ID', 'YEAR','blue','green','red','nir','swir1', 
-    'ndfi', 'soil', 'gv', 'gvs', 'npv', 'cloud', 
+    'ndfi', 'soil', 'gv', 'gvs', 'npv', 'cloud', 'shade', 'csfi',
     'CLASS_1985', 'CLASS_1986','CLASS_1987', 'CLASS_1988', 'CLASS_1989', 'CLASS_1990',
     'CLASS_1991', 'CLASS_1992','CLASS_1993', 'CLASS_1994', 'CLASS_1995', 'CLASS_1996',
     'CLASS_1997', 'CLASS_1998','CLASS_1999', 'CLASS_2000', 'CLASS_2001', 'CLASS_2002',
@@ -112,6 +112,14 @@ def getNdfi(image: ee.image.Image) -> ee.image.Image:
 
     return ee.Image(image)
 
+def getCsfi(image: ee.image.Image) -> ee.image.Image:
+    csfi = image.expression(
+        "(float(b('gv') - b('shade'))/(b('gv') + b('shade')))")
+
+    csfi = csfi.rename(['csfi'])
+
+    return image.addBands(csfi)
+
 
 '''
     Get all samples by scene
@@ -141,6 +149,7 @@ def extractSamplesByPr(pr):
             .select(BANDS, NEW_BAND_NAMES)
             .map(getFractions)
             .map(getNdfi)
+            .map(getCsfi)
         )
 
         col9 = (ee.ImageCollection('LANDSAT/LC09/C02/T1_L2')
@@ -152,6 +161,7 @@ def extractSamplesByPr(pr):
             .select(BANDS, NEW_BAND_NAMES)
             .map(getFractions)
             .map(getNdfi)
+            .map(getCsfi)
         )
 
         collection = col8.merge(col9).map(removeCloudShadow)
