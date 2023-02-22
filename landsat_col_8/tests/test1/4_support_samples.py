@@ -125,11 +125,11 @@ TEST_PR = [
   # "228061",
   # "223062",
   # "227062",
-  #"224066",
-  #"225066",
-  "224068",
-  "231069",
-  "230069"
+  # "224066",
+  # "225066",
+  # "224068",
+  # "231069",
+  # "230069"
 ]
 
 
@@ -400,18 +400,6 @@ if __name__ == '__main__':
                 print(description)
 
                 dfSupportSamplesAll.to_csv(os.path.abspath(OUTPUT.format(description)))
-
-
-
-
-
-
-
-
-
-
-
-        
 
 
 
