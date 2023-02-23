@@ -5,7 +5,7 @@ import pandas as pd
 from pprint import pprint
 
 from modules.index import getFractions, getNdfi, getCsfi
-from modules.util import removeCloudShadow
+from modules.util import removeCloudShadow, shuffle
 
 ee.Initialize()
 
@@ -66,6 +66,15 @@ YEARS = [
 BANDS = ['B2', 'B3', 'B4', 'B8', 'B11', 'B12', 'QA60']
 NEW_BAND_NAMES = ['blue','green','red','nir','swir1','swir2', 'pixel_qa']
 FEAT_SPACE_BANDS = ["gv", "gvs", "soil", "npv", "ndfi", "csfi"]
+
+
+
+# model parameters
+RF_PARAMS = {
+    'numberOfTrees': 50,
+    # 'variablesPerSplit': 4,
+    # 'minLeafPopulation': 25
+}
 
 '''
     Auxiliar Function
@@ -180,14 +189,36 @@ for year in YEARS[:1]:
                     'stable'
                 )
 
+                allSamples = shuffle(allSamples)
+
                 dfReferenceArea['samples_gee'] = dfReferenceArea.apply(
                     lambda serie: allSamples.filter(ee.Filter.eq('stable', serie['class'])).limit(serie['n_samples']),
                     axis=1
                 )
 
                 # get trainning samples
-                trainingSamples = ee.FeatureCollection(list(dfReferenceArea['samples_gee'].values)).flatten()
+                samplesTile = ee.FeatureCollection(list(dfReferenceArea['samples_gee'].values)).flatten()\
+                    .select(['stable'], ['class'])
 
+                # train samples
+                samplesTileTrain = image.sampleRegions(
+                    collection=samplesTile,  
+                    scale=10
+                )
+
+                # create model
+                model = ee.Classifier.smileRandomForest(**RF_PARAMS)\
+                    .train(samplesTileTrain, 'class', FEAT_SPACE_BANDS)
+                
+                # predict image
+                classification = image.classify(model)
+
+                # set properties
+                classification = classification\
+                    .set('version', OUTPUT_VERSION)\
+                    .set('tile', tile)\
+                    .set('grid_name', str(gridName))\
+                    .set('year', year)
 
 
             except Exception as e:
