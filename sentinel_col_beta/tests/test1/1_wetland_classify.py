@@ -16,7 +16,7 @@ ee.Initialize()
 ASSET_SAMPLES = 'projects/imazon-simex/LULC/SAMPLES/COLLECTION-S2/C7/STABLE'
 ASSET_TILES = 'projects/mapbiomas-workspace/AUXILIAR/SENTINEL2/grid_sentinel'
 ASSET_BIOMES = 'projects/mapbiomas-workspace/AUXILIAR/biomas-2019'
-ASSET_OUTPUT = ''
+ASSET_OUTPUT = 'users/jailson/mapbiomas/wetland_s2'
 
 OUTPUT_VERSION = '1'
 
@@ -131,6 +131,7 @@ def getReferenceAreaTable(tile, year):
 
     return referenceTable
 
+
 '''
     Input Data
 '''
@@ -154,11 +155,18 @@ for year in YEARS[:1]:
 
         currentTile = ee.Feature(tilesCollection.filter(ee.Filter.eq('NAME', tile)).first())
 
+        geometry = currentTile.geometry()
+        
+        ## region = geometry.getInfo()['coordinates']
+
         collection = (ee.ImageCollection('COPERNICUS/S2_HARMONIZED')
             .filterDate(str(year) + '-01-01', str(year) + '-12-30')
             .filter('CLOUDY_PIXEL_PERCENTAGE <= 50')
             .filter(ee.Filter.eq('MGRS_TILE', tile))
-            .map(lambda image: image.divide(10000).copyProperties(image))
+            .map(lambda image: 
+                image.select('B2', 'B3', 'B4', 'B8', 'B11', 'B12')\
+                    .divide(10000).addBands(image.select('QA60'))\
+                    .copyProperties(image))
             .select(BANDS, NEW_BAND_NAMES)
             .map(getFractions)
             .map(getNdfi)
@@ -206,6 +214,8 @@ for year in YEARS[:1]:
                     scale=10
                 )
 
+                pprint(samplesTileTrain.first().getInfo())
+
                 # create model
                 model = ee.Classifier.smileRandomForest(**RF_PARAMS)\
                     .train(samplesTileTrain, 'class', FEAT_SPACE_BANDS)
@@ -218,8 +228,24 @@ for year in YEARS[:1]:
                     .set('version', OUTPUT_VERSION)\
                     .set('tile', tile)\
                     .set('grid_name', str(gridName))\
-                    .set('year', year)
+                    .set('year', year)\
+                    .byte()
+                
+                name = 'wetland_{}_{}_{}_{}'.format(str(tile), gridName, str(year), OUTPUT_VERSION)
+                assetId = '{}/{}'.format(ASSET_OUTPUT, name)
 
+                print('Exporting... ' + name)
+
+                task = ee.batch.Export.image.toAsset(
+                    image=classification,
+                    description=name,
+                    assetId=assetId,
+                    scale=10,
+                    region=geometry,
+                    maxPixels=1e13
+                )
+
+                task.start()
 
             except Exception as e:
                 print(e)

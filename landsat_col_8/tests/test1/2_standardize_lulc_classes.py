@@ -75,7 +75,10 @@ def auth():
 
     return creds
 
-def getFile(creds):
+'''
+    Function to request the last uploaded file in google drive folder
+'''
+def getFile(creds) -> pd.DataFrame:
     accessToken = creds.token
 
     service = build('drive', 'v3', credentials=creds)
