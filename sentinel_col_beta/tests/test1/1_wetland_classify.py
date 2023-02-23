@@ -1,4 +1,4 @@
-import ee
+import ee, os
 import numpy as np
 import pandas as pd
 
@@ -20,6 +20,8 @@ ASSET_OUTPUT = ''
 
 MOSAIC_VERSION = '3'
 OUTPUT_VERSION = '1'
+
+FILEPATH_REF_AREA = os.path.abspath('./sentinel_col_beta/tests/test1/data/areas_c71.csv')
 
 CLASS_VALUES = {
     3: 'forest formation',
@@ -63,7 +65,48 @@ YEARS = [
 
 BANDS = ['B2', 'B3', 'B4', 'B8', 'B11', 'B12', 'QA60']
 NEW_BAND_NAMES = ['blue','green','red','nir','swir1','swir2', 'pixel_qa']
+FEAT_SPACE_BANDS = ["gv", "gvs", "soil", "npv", "ndfi", "csfi"]
 
+'''
+    Auxiliar Function
+'''
+def getProportionTable(table: pd.DataFrame, tile: int, year: int) -> pd.DataFrame:
+    
+    tablePerc = table.query("year == {} & tile == {}".format(year, tile))
+    
+    tablePerc['area_ha'] = (tablePerc['area_ha']).astype(float).round(decimals=4)
+    tablePerc['area_percent'] = (tablePerc['area_ha'] / tablePerc['area_ha'].sum()).round(decimals=4)
+    tablePerc['n_samples'] = tablePerc['area_percent'].mul(N_SAMPLES).round().astype(int)
+
+
+    # join ref area with proportion
+    df = pd.merge(tablePerc, PROPORTION_SAMPLES, how="outer", on="class")
+    
+    # compare to min samples: rule (min_samples > n_samples = min_samples)
+    df.loc[df['min_samples'] > df['n_samples'], 'n_samples'] = df['min_samples']
+    df = df.replace(float("NaN"), 0)
+
+    return df
+
+def getReferenceAreaTable(tile, year):
+   
+    referenceTable = pd.read_csv(FILEPATH_REF_AREA)[['tile', 'year','class', 'area_ha']]
+
+    # normalize classes
+    referenceTable = referenceTable.replace({'class': {
+        9:3,
+        30:25,
+        50:3,
+        19:18,
+        32:18,
+        20:18,
+        41:18,
+        11:12
+    }}).groupby(by=['tile', 'year','class']).sum().reset_index()
+
+    referenceTable = getProportionTable(referenceTable, int(tile), int(year))
+
+    return referenceTable
 
 '''
     Input Data
@@ -107,6 +150,11 @@ for year in YEARS[:1]:
             try:
 
                 image = ee.Image(collection.filter(ee.Filter.eq('system:index', idImage)).first())
+
+                image = image.select(FEAT_SPACE_BANDS)
+
+
+
 
             except Exception as e:
                 print(e)
