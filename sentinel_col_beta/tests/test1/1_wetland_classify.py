@@ -13,15 +13,14 @@ ee.Initialize()
     Config Section
 '''
 
-ASSET_SAMPLES = 'projects/imazon-simex/LULC/SAMPLES/COLLECTION-S2/C7/TRAINED'
+ASSET_SAMPLES = 'projects/imazon-simex/LULC/SAMPLES/COLLECTION-S2/C7/STABLE'
 ASSET_TILES = 'projects/mapbiomas-workspace/AUXILIAR/SENTINEL2/grid_sentinel'
 ASSET_BIOMES = 'projects/mapbiomas-workspace/AUXILIAR/biomas-2019'
 ASSET_OUTPUT = ''
 
-MOSAIC_VERSION = '3'
 OUTPUT_VERSION = '1'
 
-FILEPATH_REF_AREA = os.path.abspath('./sentinel_col_beta/tests/test1/data/areas_c71.csv')
+FILEPATH_REF_AREA = os.path.abspath('./sentinel_col_beta/tests/test1/data/areas_c71_grid_sentinel.csv')
 
 CLASS_VALUES = {
     3: 'forest formation',
@@ -40,7 +39,8 @@ CLASS_REMAP = np.array([
     [15, 0],
     [12, 0],
     [25, 0],
-    [33, 1]
+    [33, 1],
+    [18, 0]
 ])
 
 # proportion data
@@ -70,9 +70,11 @@ FEAT_SPACE_BANDS = ["gv", "gvs", "soil", "npv", "ndfi", "csfi"]
 '''
     Auxiliar Function
 '''
-def getProportionTable(table: pd.DataFrame, tile: int, year: int) -> pd.DataFrame:
+def getProportionTable(table: pd.DataFrame, tile: str, year: int) -> pd.DataFrame:
     
-    tablePerc = table.query("year == {} & tile == {}".format(year, tile))
+    tablePerc = table.query("year == {} & tile == '{}'".format(year, tile))
+
+
     
     tablePerc['area_ha'] = (tablePerc['area_ha']).astype(float).round(decimals=4)
     tablePerc['area_percent'] = (tablePerc['area_ha'] / tablePerc['area_ha'].sum()).round(decimals=4)
@@ -90,21 +92,33 @@ def getProportionTable(table: pd.DataFrame, tile: int, year: int) -> pd.DataFram
 
 def getReferenceAreaTable(tile, year):
    
-    referenceTable = pd.read_csv(FILEPATH_REF_AREA)[['tile', 'year','class', 'area_ha']]
+    referenceTable = pd.read_csv(FILEPATH_REF_AREA)[['tile', 'gridname','year','class', 'area_ha']]
 
     # normalize classes
     referenceTable = referenceTable.replace({'class': {
-        9:3,
-        30:25,
-        50:3,
-        19:18,
-        32:18,
-        20:18,
-        41:18,
-        11:12
-    }}).groupby(by=['tile', 'year','class']).sum().reset_index()
+        9:0,
+        30:0,
+        50:0,
+        19:0,
+        32:0,
+        20:0,
+        41:0,
+        11:1,
+        3: 0,
+        4: 0,
+        15: 0,
+        12: 0,
+        25: 0,
+        33: 1,
+        21: 0,
+        24: 0,
+        39: 0,
+        62: 0
+    }}).groupby(by=['tile', 'gridname', 'year','class']).sum().reset_index()
 
-    referenceTable = getProportionTable(referenceTable, int(tile), int(year))
+    referenceTable = getProportionTable(referenceTable, str(tile), int(year))
+
+    #pprint(referenceTable.head())
 
     return referenceTable
 
@@ -128,7 +142,7 @@ if len(TILES) == 0:
 for year in YEARS[:1]:
 
     for tile in TILES[:1]:
-        
+
         currentTile = ee.Feature(tilesCollection.filter(ee.Filter.eq('NAME', tile)).first())
 
         collection = (ee.ImageCollection('COPERNICUS/S2_HARMONIZED')
@@ -150,9 +164,29 @@ for year in YEARS[:1]:
             try:
 
                 image = ee.Image(collection.filter(ee.Filter.eq('system:index', idImage)).first())
-
                 image = image.select(FEAT_SPACE_BANDS)
 
+                # proportion table area
+                dfReferenceArea = getReferenceAreaTable(tile, year)
+
+                gridName = dfReferenceArea['gridname'].values[0]
+
+                # samples
+                assetTileSamples = '{}/{}-STABLE-1000-{}'.format(ASSET_SAMPLES, gridName, '5')
+
+                allSamples = ee.FeatureCollection(assetTileSamples).remap(
+                    CLASS_REMAP[:,0:1].flatten().tolist(), 
+                    CLASS_REMAP[:,1:2].flatten().tolist(),
+                    'stable'
+                )
+
+                dfReferenceArea['samples_gee'] = dfReferenceArea.apply(
+                    lambda serie: allSamples.filter(ee.Filter.eq('stable', serie['class'])).limit(serie['n_samples']),
+                    axis=1
+                )
+
+                # get trainning samples
+                trainingSamples = ee.FeatureCollection(list(dfReferenceArea['samples_gee'].values)).flatten()
 
 
 
