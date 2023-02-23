@@ -2,8 +2,12 @@ import ee
 import numpy as np
 import pandas as pd
 
+from pprint import pprint
+
 from modules.index import getFractions, getNdfi, getCsfi
 from modules.util import removeCloudShadow
+
+ee.Initialize()
 
 '''
     Config Section
@@ -70,8 +74,6 @@ amazonia = ee.FeatureCollection(ASSET_BIOMES).filter('Bioma == "Amazônia"')
 tilesCollection = ee.FeatureCollection(ASSET_TILES)\
     .filterBounds(amazonia)
 
-tilesCollectionCenter = tilesCollection.map(lambda feat: feat.centroid())
-
 if len(TILES) == 0:
     TILES = tilesCollection.reduceColumns(ee.Reducer.toList(), ['NAME']).get('list')\
         .getInfo()
@@ -80,15 +82,13 @@ if len(TILES) == 0:
     Iterate Years
 '''
 
-for year in YEARS:
+for year in YEARS[:1]:
 
-
-    for tile in TILES:
+    for tile in TILES[:1]:
         
-        currentTileCenter = ee.Feature(tilesCollectionCenter.filter(ee.Filter.eq('NAME', tile)).first())
+        currentTile = ee.Feature(tilesCollection.filter(ee.Filter.eq('NAME', tile)).first())
 
-        collection = (ee.ImageCollection('')
-            .filterBounds(currentTileCenter.geometry())
+        collection = (ee.ImageCollection('COPERNICUS/S2_HARMONIZED')
             .filterDate(str(year) + '-01-01', str(year) + '-12-30')
             .filter('CLOUDY_PIXEL_PERCENTAGE <= 50')
             .filter(ee.Filter.eq('MGRS_TILE', tile))
@@ -100,7 +100,14 @@ for year in YEARS:
             .map(removeCloudShadow)
         )
 
+        listIdImages = collection.reduceColumns(ee.Reducer.toList(), ['system:index']).get('list')\
+            .getInfo()
         
+        for idImage in listIdImages:
+            try:
 
+                image = ee.Image(collection.filter(ee.Filter.eq('system:index', idImage)).first())
 
+            except Exception as e:
+                print(e)
 
