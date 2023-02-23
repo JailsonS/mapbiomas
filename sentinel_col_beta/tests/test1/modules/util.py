@@ -38,8 +38,8 @@ def removeCloudShadow(image: ee.image.Image) -> ee.image.Image:
     
     qa = image.select('pixel_qa')
     
-    cloudBitMask = 1 << 4
-    shadeBitMask = 1 << 3
+    cloudBitMask = 1 << 10
+    shadeBitMask = 1 << 11
     
     mask = qa.bitwiseAnd(cloudBitMask).eq(0).And(qa.bitwiseAnd(shadeBitMask).eq(0))
     
