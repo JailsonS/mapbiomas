@@ -35,7 +35,7 @@ CLASS_VALUES = {
 CLASS_REMAP = np.array([
     [3, 0],
     [4, 0],
-    [11, 1],
+    [11, 0],
     [15, 0],
     [12, 0],
     [25, 0],
@@ -44,14 +44,17 @@ CLASS_REMAP = np.array([
 ])
 
 # proportion data
-N_SAMPLES = 2000
+N_SAMPLES = 3000
 
 PROPORTION_SAMPLES = pd.DataFrame([
-    {'class':  0, 'min_samples': N_SAMPLES * 0.7, 'proportion': 0.7},
-    {'class':  1, 'min_samples': N_SAMPLES * 0.3, 'proportion': 0.3},
+    {'class':  0, 'min_samples': N_SAMPLES * 0.75, 'proportion': 0.75},
+    {'class':  1, 'min_samples': N_SAMPLES * 0.25, 'proportion': 0.25},
 ])
 
-TILES = []
+TILES = [
+  '21LYJ',
+  '22MET'  
+]
     
 YEARS = [
     2016,
@@ -65,13 +68,13 @@ YEARS = [
 
 BANDS = ['B2', 'B3', 'B4', 'B8', 'B11', 'B12', 'QA60']
 NEW_BAND_NAMES = ['blue','green','red','nir','swir1','swir2', 'pixel_qa']
-FEAT_SPACE_BANDS = ["gv", "gvs", "soil", "npv", "ndfi", "csfi"]
 
+FEAT_SPACE_BANDS = ["gv", "gvs", "soil", "npv", "ndfi", "csfi", "ndfi_max", "ndfi_min"]
 
 
 # model parameters
 RF_PARAMS = {
-    'numberOfTrees': 50,
+    'numberOfTrees': 60,
     # 'variablesPerSplit': 4,
     # 'minLeafPopulation': 25
 }
@@ -85,7 +88,7 @@ def getProportionTable(table: pd.DataFrame, tile: str, year: int) -> pd.DataFram
 
 
     
-    tablePerc['area_ha'] = (tablePerc['area_ha']).astype(float).round(decimals=4)
+    #tablePerc['area_ha'] = (tablePerc['area_ha']).astype(float).round(decimals=4)
     tablePerc['area_percent'] = (tablePerc['area_ha'] / tablePerc['area_ha'].sum()).round(decimals=4)
     tablePerc['n_samples'] = tablePerc['area_percent'].mul(N_SAMPLES).round().astype(int)
 
@@ -112,7 +115,7 @@ def getReferenceAreaTable(tile, year):
         32:0,
         20:0,
         41:0,
-        11:1,
+        11:0,
         3: 0,
         4: 0,
         15: 0,
@@ -131,6 +134,33 @@ def getReferenceAreaTable(tile, year):
 
     return referenceTable
 
+def addCloudAgroShadow(collection):
+    
+    idw = collection.select('ndfi').reduce(ee.Reducer.minMax())
+    sdw = collection.select('soil').reduce(ee.Reducer.minMax())
+
+    indices = idw.addBands(sdw)
+
+    def getAgroShadowBand(image):
+        strband = image.expression('((1-b("swir1"))**2)/(2*b("swir1"))').rename('str')
+        image = image.addBands(indices).addBands(strband)
+
+        agroshadow = image.expression(
+            '(b("ndfi_min")**(b("soil_min") * b("ndfi"))) - b("str")' + 
+            '/' +
+            '(b("ndfi_min")**(b("soil_min") * b("ndfi"))) - (b("ndfi_max")**(b("soil_max") * b("ndfi")))'
+        )
+
+        return image.addBands(ee.Image(agroshadow).rename('w'))
+
+    collection = collection.map(getAgroShadowBand)
+    
+    return collection
+
+def removeShadow(image):
+    agroshadow = image.select('w')
+    mask = agroshadow.gt(-35).And(agroshadow.lt(-5))
+    return image.mask(mask.eq(0))
 
 '''
     Input Data
@@ -173,6 +203,13 @@ for year in YEARS[:1]:
             .map(getCsfi)
             .map(removeCloudShadow)
         )
+        
+        ndfiMinMax = collection.select('ndfi').reduce(ee.Reducer.minMax())
+
+        #collection = addCloudAgroShadow(collection)
+        #collection = collection.map(removeShadow)
+
+        #pprint(paramsShadow.bandNames().getInfo())
 
         listIdImages = collection.reduceColumns(ee.Reducer.toList(), ['system:index']).get('list')\
             .getInfo()
@@ -180,7 +217,7 @@ for year in YEARS[:1]:
         for idImage in listIdImages:
             try:
 
-                image = ee.Image(collection.filter(ee.Filter.eq('system:index', idImage)).first())
+                image = ee.Image(collection.filter(ee.Filter.eq('system:index', idImage)).first()).addBands(ndfiMinMax)
                 image = image.select(FEAT_SPACE_BANDS)
 
                 # proportion table area
@@ -214,8 +251,6 @@ for year in YEARS[:1]:
                     scale=10
                 )
 
-                pprint(samplesTileTrain.first().getInfo())
-
                 # create model
                 model = ee.Classifier.smileRandomForest(**RF_PARAMS)\
                     .train(samplesTileTrain, 'class', FEAT_SPACE_BANDS)
@@ -231,8 +266,9 @@ for year in YEARS[:1]:
                     .set('year', year)\
                     .byte()
                 
-                name = 'wetland_{}_{}_{}_{}'.format(str(tile), gridName, str(year), OUTPUT_VERSION)
+                name = '{}_{}_{}_{}_{}'.format(idImage,str(tile), gridName, str(year), OUTPUT_VERSION)
                 assetId = '{}/{}'.format(ASSET_OUTPUT, name)
+
 
                 print('Exporting... ' + name)
 
@@ -249,4 +285,5 @@ for year in YEARS[:1]:
 
             except Exception as e:
                 print(e)
+
 
