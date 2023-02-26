@@ -1,6 +1,7 @@
 import ee, os
 import numpy as np
 import pandas as pd
+import random
 
 from pprint import pprint
 
@@ -52,12 +53,12 @@ PROPORTION_SAMPLES = pd.DataFrame([
 ])
 
 TILES = [
-  '21LYJ',
-  '22MET'  
+  '21MYT',
+  '21LYJ'  
 ]
     
 YEARS = [
-    2016,
+    #2016,
     2017,
     2018,
     2019,
@@ -69,7 +70,12 @@ YEARS = [
 BANDS = ['B2', 'B3', 'B4', 'B8', 'B11', 'B12', 'QA60']
 NEW_BAND_NAMES = ['blue','green','red','nir','swir1','swir2', 'pixel_qa']
 
-FEAT_SPACE_BANDS = ["gv", "gvs", "soil", "npv", "ndfi", "csfi", "ndfi_max", "ndfi_min"]
+FEAT_SPACE_BANDS = [
+    "gv", "gvs", "soil", "npv", "ndfi", "csfi", 
+    "ndfi_max", "ndfi_min",
+    "soil_max", "soil_min",
+    "gv_max", "gv_min"
+]
 
 
 # model parameters
@@ -108,24 +114,9 @@ def getReferenceAreaTable(tile, year):
 
     # normalize classes
     referenceTable = referenceTable.replace({'class': {
-        9:0,
-        30:0,
-        50:0,
-        19:0,
-        32:0,
-        20:0,
-        41:0,
-        11:0,
-        3: 0,
-        4: 0,
-        15: 0,
-        12: 0,
-        25: 0,
-        33: 1,
-        21: 0,
-        24: 0,
-        39: 0,
-        62: 0
+        9:0, 30:0, 50:0, 19:0, 32:0, 20:0, 41:0, 11:0,
+        3: 0,4: 0,15: 0,12: 0,25: 0,33: 1,21: 0,
+        24: 0,39: 0,62: 0
     }}).groupby(by=['tile', 'gridname', 'year','class']).sum().reset_index()
 
     referenceTable = getProportionTable(referenceTable, str(tile), int(year))
@@ -134,33 +125,14 @@ def getReferenceAreaTable(tile, year):
 
     return referenceTable
 
-def addCloudAgroShadow(collection):
-    
-    idw = collection.select('ndfi').reduce(ee.Reducer.minMax())
-    sdw = collection.select('soil').reduce(ee.Reducer.minMax())
-
-    indices = idw.addBands(sdw)
-
-    def getAgroShadowBand(image):
-        strband = image.expression('((1-b("swir1"))**2)/(2*b("swir1"))').rename('str')
-        image = image.addBands(indices).addBands(strband)
-
-        agroshadow = image.expression(
-            '(b("ndfi_min")**(b("soil_min") * b("ndfi"))) - b("str")' + 
-            '/' +
-            '(b("ndfi_min")**(b("soil_min") * b("ndfi"))) - (b("ndfi_max")**(b("soil_max") * b("ndfi")))'
-        )
-
-        return image.addBands(ee.Image(agroshadow).rename('w'))
-
-    collection = collection.map(getAgroShadowBand)
-    
-    return collection
-
 def removeShadow(image):
-    agroshadow = image.select('w')
-    mask = agroshadow.gt(-35).And(agroshadow.lt(-5))
-    return image.mask(mask.eq(0))
+  threshShade = image.select('shade').gt(0.8)
+  threshNdfi = image.select('ndfi').gt(0.5)
+  #treshGv = image.select('ndvi').gt(0.5).and(image.select('ndfi').lt(0.4));
+  
+  mask = threshShade.And(threshNdfi)
+  
+  return image.mask(mask.eq(0))
 
 '''
     Input Data
@@ -181,7 +153,7 @@ if len(TILES) == 0:
 
 for year in YEARS[:1]:
 
-    for tile in TILES[:1]:
+    for tile in TILES[:2]:
 
         currentTile = ee.Feature(tilesCollection.filter(ee.Filter.eq('NAME', tile)).first())
 
@@ -202,20 +174,19 @@ for year in YEARS[:1]:
             .map(getNdfi)
             .map(getCsfi)
             .map(removeCloudShadow)
+            .map(removeShadow)
         )
         
-        ndfiMinMax = collection.select('ndfi').reduce(ee.Reducer.minMax())
-
-        #collection = addCloudAgroShadow(collection)
-        #collection = collection.map(removeShadow)
-
-        #pprint(paramsShadow.bandNames().getInfo())
+        ndfiMinMax = collection.select(['ndfi', 'gv', 'soil']).reduce(ee.Reducer.minMax())
 
         listIdImages = collection.reduceColumns(ee.Reducer.toList(), ['system:index']).get('list')\
             .getInfo()
         
         for idImage in listIdImages:
             try:
+
+                tile = tile
+                pprint(tile)
 
                 image = ee.Image(collection.filter(ee.Filter.eq('system:index', idImage)).first()).addBands(ndfiMinMax)
                 image = image.select(FEAT_SPACE_BANDS)
@@ -224,16 +195,30 @@ for year in YEARS[:1]:
                 dfReferenceArea = getReferenceAreaTable(tile, year)
 
                 gridName = dfReferenceArea['gridname'].values[0]
+                gridNamesRandom = list(random.choices(list(dfReferenceArea['gridname'].values), k=3))
 
-                # samples
+                # samples from one tile
                 assetTileSamples = '{}/{}-STABLE-1000-{}'.format(ASSET_SAMPLES, gridName, '5')
-
-                allSamples = ee.FeatureCollection(assetTileSamples).remap(
+                samplesTile = ee.FeatureCollection(assetTileSamples).remap(
                     CLASS_REMAP[:,0:1].flatten().tolist(), 
                     CLASS_REMAP[:,1:2].flatten().tolist(),
                     'stable'
                 )
 
+
+
+                # samples from random tiles
+                assetRandomTiles = map(lambda gridName: '{}/{}-STABLE-1000-{}'.format(ASSET_SAMPLES, gridName, '5'), gridNamesRandom)
+                assetRandomTiles = list(assetRandomTiles)
+
+                samplesTilesRandom = map(lambda asset: ee.FeatureCollection(asset), assetRandomTiles)
+                samplesTilesRandom = ee.FeatureCollection(list(samplesTilesRandom)).flatten().remap(
+                    CLASS_REMAP[:,0:1].flatten().tolist(), 
+                    CLASS_REMAP[:,1:2].flatten().tolist(),
+                    'stable'
+                )
+
+                allSamples = samplesTile.merge(samplesTilesRandom)
                 allSamples = shuffle(allSamples)
 
                 dfReferenceArea['samples_gee'] = dfReferenceArea.apply(
@@ -264,13 +249,14 @@ for year in YEARS[:1]:
                     .set('tile', tile)\
                     .set('grid_name', str(gridName))\
                     .set('year', year)\
+                    .set('id_image', idImage)\
                     .byte()
                 
                 name = '{}_{}_{}_{}_{}'.format(idImage,str(tile), gridName, str(year), OUTPUT_VERSION)
                 assetId = '{}/{}'.format(ASSET_OUTPUT, name)
 
 
-                print('Exporting... ' + name)
+                pprint('Exporting... ' + name)
 
                 task = ee.batch.Export.image.toAsset(
                     image=classification,
