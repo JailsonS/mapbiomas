@@ -53,7 +53,7 @@ PROPORTION_SAMPLES = pd.DataFrame([
 ])
 
 TILES = [
-  '21MYT',
+  #'21MYT',
   # '21LYJ'  
 ]
     
@@ -62,7 +62,7 @@ YEARS = [
     # 2017,
     # 2018,
     # 2019,
-    2020,
+    # 2020,
     # 2021,
     # 2022,
 ]
@@ -144,9 +144,9 @@ amazonia = ee.FeatureCollection(ASSET_BIOMES).filter('Bioma == "Amazônia"')
 tilesCollection = ee.FeatureCollection(ASSET_TILES)\
     .filterBounds(amazonia)
 
-#alreadyInCollection = ee.ImageCollection(ASSET_OUTPUT)\
-#    .reduceColumns(ee.Reducer.toList(), ['tile']).get('list')\
-#    .getInfo()
+alreadyInCollection = ee.ImageCollection(ASSET_OUTPUT)\
+    .reduceColumns(ee.Reducer.toList(), ['tile']).get('list')\
+    .getInfo()
 
 if len(TILES) == 0:
     TILES = tilesCollection.reduceColumns(ee.Reducer.toList(), ['NAME']).get('list')\
@@ -188,7 +188,7 @@ for year in YEARS:
         listIdImages = collection.reduceColumns(ee.Reducer.toList(), ['system:index']).get('list')\
             .getInfo()
         
- #       listIdImages = list(set(listIdImages) - set(alreadyInCollection))
+        listIdImages = list(set(listIdImages) - set(alreadyInCollection))
 
 
         for idImage in listIdImages:
