@@ -13,18 +13,18 @@ def shuffle(collection, seed=1):
         )
     )
 
+    #listIdRandom =  collection.reduceColumns(ee.Reducer.toList(), ['new_id']).get('list')
+
     # list of random ids
-    randomIdList = ee.List(
-        collection.reduceColumns(ee.Reducer.toList(), ['new_id'])
-        .get('list'))
+    #randomIdList = ee.List(listIdRandom)
 
     # list of sequential ids
-    sequentialIdList = ee.List.sequence(1, collection.size())
+    #sequentialIdList = ee.List.sequence(1, collection.size())
 
     # set new ids
-    shuffled = collection.remap(randomIdList, sequentialIdList, 'new_id')
+    #shuffled = collection.remap(randomIdList, sequentialIdList, 'new_id')
 
-    return shuffled
+    return collection
 
 def applyScaleFactorsL8L9(image: ee.image.Image) -> ee.image.Image:
     opticalBands = ee.Image(image).select('SR_B.').multiply(0.0000275).add(-0.2)

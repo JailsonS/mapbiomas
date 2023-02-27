@@ -14,7 +14,7 @@ ee.Initialize()
     Config Section
 '''
 
-ASSET_SAMPLES = 'projects/imazon-simex/LULC/SAMPLES/COLLECTION-S2/C7/STABLE'
+ASSET_SAMPLES = 'projects/imazon-simex/LULC/SAMPLES/COLLECTION-S2/C7/TRAINED'
 ASSET_TILES = 'projects/mapbiomas-workspace/AUXILIAR/SENTINEL2/grid_sentinel'
 ASSET_BIOMES = 'projects/mapbiomas-workspace/AUXILIAR/biomas-2019'
 ASSET_OUTPUT = 'users/jailson/mapbiomas/wetland_s2'
@@ -48,23 +48,23 @@ CLASS_REMAP = np.array([
 N_SAMPLES = 3000
 
 PROPORTION_SAMPLES = pd.DataFrame([
-    {'class':  0, 'min_samples': N_SAMPLES * 0.75, 'proportion': 0.75},
-    {'class':  1, 'min_samples': N_SAMPLES * 0.25, 'proportion': 0.25},
+    {'class':  0, 'min_samples': N_SAMPLES * 0.6, 'proportion': 0.6},
+    {'class':  1, 'min_samples': N_SAMPLES * 0.4, 'proportion': 0.4},
 ])
 
 TILES = [
   '21MYT',
-  '21LYJ'  
+  # '21LYJ'  
 ]
     
 YEARS = [
-    #2016,
-    2017,
-    2018,
-    2019,
+    # 2016,
+    # 2017,
+    # 2018,
+    # 2019,
     2020,
-    2021,
-    2022,
+    # 2021,
+    # 2022,
 ]
 
 BANDS = ['B2', 'B3', 'B4', 'B8', 'B11', 'B12', 'QA60']
@@ -74,7 +74,8 @@ FEAT_SPACE_BANDS = [
     "gv", "gvs", "soil", "npv", "ndfi", "csfi", 
     "ndfi_max", "ndfi_min",
     "soil_max", "soil_min",
-    "gv_max", "gv_min"
+    "gv_max", "gv_min",
+    "ndfi_median", "soil_median", "gv_median"
 ]
 
 
@@ -143,6 +144,10 @@ amazonia = ee.FeatureCollection(ASSET_BIOMES).filter('Bioma == "Amazônia"')
 tilesCollection = ee.FeatureCollection(ASSET_TILES)\
     .filterBounds(amazonia)
 
+#alreadyInCollection = ee.ImageCollection(ASSET_OUTPUT)\
+#    .reduceColumns(ee.Reducer.toList(), ['tile']).get('list')\
+#    .getInfo()
+
 if len(TILES) == 0:
     TILES = tilesCollection.reduceColumns(ee.Reducer.toList(), ['NAME']).get('list')\
         .getInfo()
@@ -151,9 +156,9 @@ if len(TILES) == 0:
     Iterate Years
 '''
 
-for year in YEARS[:1]:
+for year in YEARS:
 
-    for tile in TILES[:2]:
+    for tile in TILES:
 
         currentTile = ee.Feature(tilesCollection.filter(ee.Filter.eq('NAME', tile)).first())
 
@@ -177,18 +182,23 @@ for year in YEARS[:1]:
             .map(removeShadow)
         )
         
-        ndfiMinMax = collection.select(['ndfi', 'gv', 'soil']).reduce(ee.Reducer.minMax())
+        minMax = collection.select(['ndfi', 'gv', 'soil']).reduce(ee.Reducer.minMax())
+        median = collection.select(['ndfi', 'gv', 'soil']).reduce(ee.Reducer.median())
 
         listIdImages = collection.reduceColumns(ee.Reducer.toList(), ['system:index']).get('list')\
             .getInfo()
         
+ #       listIdImages = list(set(listIdImages) - set(alreadyInCollection))
+
+
         for idImage in listIdImages:
             try:
 
                 tile = tile
-                pprint(tile)
 
-                image = ee.Image(collection.filter(ee.Filter.eq('system:index', idImage)).first()).addBands(ndfiMinMax)
+                image = ee.Image(collection.filter(ee.Filter.eq('system:index', idImage)).first())\
+                    .addBands(minMax)\
+                    .addBands(median)
                 image = image.select(FEAT_SPACE_BANDS)
 
                 # proportion table area
@@ -198,43 +208,50 @@ for year in YEARS[:1]:
                 gridNamesRandom = list(random.choices(list(dfReferenceArea['gridname'].values), k=3))
 
                 # samples from one tile
-                assetTileSamples = '{}/{}-STABLE-1000-{}'.format(ASSET_SAMPLES, gridName, '5')
+                assetTileSamples = '{}/{}-{}-{}'.format(ASSET_SAMPLES, gridName, str(year),'5')
                 samplesTile = ee.FeatureCollection(assetTileSamples).remap(
                     CLASS_REMAP[:,0:1].flatten().tolist(), 
                     CLASS_REMAP[:,1:2].flatten().tolist(),
-                    'stable'
-                )
-
+                    'class'
+                ).select(['class'])
 
 
                 # samples from random tiles
-                assetRandomTiles = map(lambda gridName: '{}/{}-STABLE-1000-{}'.format(ASSET_SAMPLES, gridName, '5'), gridNamesRandom)
+                assetRandomTiles = map(lambda gridName: '{}/{}-{}-{}'.format(ASSET_SAMPLES, gridName, str(year),'5'), gridNamesRandom)
                 assetRandomTiles = list(assetRandomTiles)
 
                 samplesTilesRandom = map(lambda asset: ee.FeatureCollection(asset), assetRandomTiles)
                 samplesTilesRandom = ee.FeatureCollection(list(samplesTilesRandom)).flatten().remap(
                     CLASS_REMAP[:,0:1].flatten().tolist(), 
                     CLASS_REMAP[:,1:2].flatten().tolist(),
-                    'stable'
-                )
+                    'class'
+                ).select(['class'])
 
-                allSamples = samplesTile.merge(samplesTilesRandom)
-                allSamples = shuffle(allSamples)
+  
+
+                allSamples = ee.FeatureCollection(samplesTile.merge(samplesTilesRandom))
+                allSamples = shuffle(collection=allSamples)
+
+
 
                 dfReferenceArea['samples_gee'] = dfReferenceArea.apply(
-                    lambda serie: allSamples.filter(ee.Filter.eq('stable', serie['class'])).limit(serie['n_samples']),
+                    lambda serie: allSamples.filter(ee.Filter.eq('class', serie['class'])).limit(serie['n_samples']),
                     axis=1
                 )
 
                 # get trainning samples
-                samplesTile = ee.FeatureCollection(list(dfReferenceArea['samples_gee'].values)).flatten()\
-                    .select(['stable'], ['class'])
+                samplesTileFc = ee.FeatureCollection(list(dfReferenceArea['samples_gee'].values)).flatten()
+                samplesTileFc = samplesTileFc.select(['class'])
+
+                #pprint(samplesTileFc.first().getInfo())
 
                 # train samples
                 samplesTileTrain = image.sampleRegions(
-                    collection=samplesTile,  
+                    collection=samplesTileFc,  
                     scale=10
                 )
+                
+                #pprint(samplesTileTrain.first().getInfo())
 
                 # create model
                 model = ee.Classifier.smileRandomForest(**RF_PARAMS)\
@@ -267,9 +284,8 @@ for year in YEARS[:1]:
                     maxPixels=1e13
                 )
 
+
                 task.start()
 
             except Exception as e:
                 print(e)
-
-
