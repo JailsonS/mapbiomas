@@ -17,7 +17,7 @@ ee.Initialize()
 ASSET_SAMPLES = 'projects/imazon-simex/LULC/SAMPLES/COLLECTION-S2/C7/TRAINED'
 ASSET_TILES = 'projects/mapbiomas-workspace/AUXILIAR/SENTINEL2/grid_sentinel'
 ASSET_BIOMES = 'projects/mapbiomas-workspace/AUXILIAR/biomas-2019'
-ASSET_OUTPUT = 'users/jailson/mapbiomas/wetland_s2'
+ASSET_OUTPUT = 'projects/imazon-simex/LULC/SENTINEL-2-CBETA/wetland'
 
 OUTPUT_VERSION = '1'
 
@@ -64,7 +64,7 @@ YEARS = [
     # 2019,
     # 2020,
     # 2021,
-    # 2022,
+    2022,
 ]
 
 BANDS = ['B2', 'B3', 'B4', 'B8', 'B11', 'B12', 'QA60']
@@ -201,14 +201,16 @@ for year in YEARS:
                     .addBands(median)
                 image = image.select(FEAT_SPACE_BANDS)
 
+                yearSample = year - 1 if year == 2022 else year
+
                 # proportion table area
-                dfReferenceArea = getReferenceAreaTable(tile, year)
+                dfReferenceArea = getReferenceAreaTable(tile, yearSample)
 
                 gridName = dfReferenceArea['gridname'].values[0]
                 gridNamesRandom = list(random.choices(list(dfReferenceArea['gridname'].values), k=3))
 
                 # samples from one tile
-                assetTileSamples = '{}/{}-{}-{}'.format(ASSET_SAMPLES, gridName, str(year),'5')
+                assetTileSamples = '{}/{}-{}-{}'.format(ASSET_SAMPLES, gridName, str(yearSample),'5')
                 samplesTile = ee.FeatureCollection(assetTileSamples).remap(
                     CLASS_REMAP[:,0:1].flatten().tolist(), 
                     CLASS_REMAP[:,1:2].flatten().tolist(),
@@ -217,7 +219,7 @@ for year in YEARS:
 
 
                 # samples from random tiles
-                assetRandomTiles = map(lambda gridName: '{}/{}-{}-{}'.format(ASSET_SAMPLES, gridName, str(year),'5'), gridNamesRandom)
+                assetRandomTiles = map(lambda gridName: '{}/{}-{}-{}'.format(ASSET_SAMPLES, gridName, str(yearSample),'5'), gridNamesRandom)
                 assetRandomTiles = list(assetRandomTiles)
 
                 samplesTilesRandom = map(lambda asset: ee.FeatureCollection(asset), assetRandomTiles)
