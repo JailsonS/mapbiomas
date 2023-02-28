@@ -52,19 +52,16 @@ PROPORTION_SAMPLES = pd.DataFrame([
     {'class':  1, 'min_samples': N_SAMPLES * 0.4, 'proportion': 0.4},
 ])
 
-TILES = [
-  #'21MYT',
-  # '21LYJ'  
-]
+TILES = []
     
 YEARS = [
     # 2016,
     # 2017,
     # 2018,
     # 2019,
-    # 2020,
+    # 2020, # <-- não rodar 2020
     # 2021,
-    2022,
+    # 2022,
 ]
 
 BANDS = ['B2', 'B3', 'B4', 'B8', 'B11', 'B12', 'QA60']
