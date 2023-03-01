@@ -48,8 +48,8 @@ CLASS_REMAP = np.array([
 N_SAMPLES = 3000
 
 PROPORTION_SAMPLES = pd.DataFrame([
-    {'class':  0, 'min_samples': N_SAMPLES * 0.6, 'proportion': 0.6},
-    {'class':  1, 'min_samples': N_SAMPLES * 0.4, 'proportion': 0.4},
+    {'class':  0, 'min_samples': N_SAMPLES * 0.75, 'proportion': 0.75},
+    {'class':  1, 'min_samples': N_SAMPLES * 0.25, 'proportion': 0.25},
 ])
 
 TILES = []
