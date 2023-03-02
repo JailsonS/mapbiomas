@@ -10,6 +10,8 @@ from modules.util import removeCloudShadow, shuffle
 
 ee.Initialize()
 
+pd.options.mode.chained_assignment = None  # default='warn'
+
 '''
     Config Section
 '''
@@ -52,14 +54,14 @@ PROPORTION_SAMPLES = pd.DataFrame([
     {'class':  1, 'min_samples': N_SAMPLES * 0.25, 'proportion': 0.25},
 ])
 
-TILES = []
+TILES = ['21MTU', '21MUM', '21MUQ', '21MUP']
     
 YEARS = [
     # 2016,
     # 2017,
     # 2018,
     # 2019,
-    # 2020, # <-- não rodar 2020
+    2020, # <-- não rodar 2020
     # 2021,
     # 2022,
 ]
@@ -132,6 +134,64 @@ def removeShadow(image):
   
   return image.mask(mask.eq(0))
 
+def trainRandomTileImg(randomTiles: list, year: int) -> ee.featurecollection.FeatureCollection:
+    
+
+    pprint(randomTiles)
+
+    def trainOneImageByTile(year, tile) -> ee.featurecollection.FeatureCollection:
+
+        dfReferenceArea = getReferenceAreaTable(tile, year)
+
+        grid = dfReferenceArea['gridname'].values[0]
+
+        assetRandomTile = '{}/{}-{}-{}'.format(ASSET_SAMPLES, grid, str(year),'5')
+        
+        sp = ee.FeatureCollection(assetRandomTile).remap(
+            CLASS_REMAP[:,0:1].flatten().tolist(), 
+            CLASS_REMAP[:,1:2].flatten().tolist(),
+            'class'
+        ).select(['class'])
+
+        vals = sp.reduceColumns(ee.Reducer.frequencyHistogram(), ['class']).get('histogram').getInfo()
+
+        pprint(vals)
+
+        colTile = (ee.ImageCollection('COPERNICUS/S2_HARMONIZED')
+            .filterDate(str(year) + '-01-01', str(year) + '-12-30')
+            .filter('CLOUDY_PIXEL_PERCENTAGE <= 50')
+            .filter(ee.Filter.eq('MGRS_TILE', tile))
+            .map(lambda image: 
+                image.select('B2', 'B3', 'B4', 'B8', 'B11', 'B12')\
+                    .divide(10000).addBands(image.select('QA60'))\
+                    .copyProperties(image))
+            .select(BANDS, NEW_BAND_NAMES)
+            .sort('CLOUDY_PIXEL_PERCENTAGE')
+            .map(getFractions)
+            .map(getNdfi)
+            .map(getCsfi)
+            .map(removeCloudShadow)
+            .map(removeShadow)
+        )
+
+        minMax = colTile.select(['ndfi', 'gv', 'soil']).reduce(ee.Reducer.minMax())
+        median = colTile.select(['ndfi', 'gv', 'soil']).reduce(ee.Reducer.median())
+
+        imageTile = ee.Image(colTile.first()).addBands(minMax).addBands(median)
+
+        samplesRandomTileTrain = imageTile.sampleRegions(
+            collection=sp,  
+            scale=10
+        )
+
+        return samplesRandomTileTrain
+
+    listTrainRandom = map(lambda tile: trainOneImageByTile(year, tile), randomTiles)
+
+    trained = ee.FeatureCollection(list(listTrainRandom)).flatten()
+
+    return trained
+
 '''
     Input Data
 '''
@@ -155,7 +215,7 @@ if len(TILES) == 0:
 
 for year in YEARS:
 
-    for tile in TILES:
+    for tile in TILES[:1]:
 
         currentTile = ee.Feature(tilesCollection.filter(ee.Filter.eq('NAME', tile)).first())
 
@@ -187,8 +247,8 @@ for year in YEARS:
         
         listIdImages = list(set(listIdImages) - set(alreadyInCollection))
 
-
-        for idImage in listIdImages:
+        listIdImages = ['20200709T142741_20200709T142735_T21MTU']
+        for idImage in listIdImages[:1]:
             try:
 
                 tile = tile
@@ -204,7 +264,6 @@ for year in YEARS:
                 dfReferenceArea = getReferenceAreaTable(tile, yearSample)
 
                 gridName = dfReferenceArea['gridname'].values[0]
-                gridNamesRandom = list(random.choices(list(dfReferenceArea['gridname'].values), k=3))
 
                 # samples from one tile
                 assetTileSamples = '{}/{}-{}-{}'.format(ASSET_SAMPLES, gridName, str(yearSample),'5')
@@ -215,46 +274,38 @@ for year in YEARS:
                 ).select(['class'])
 
 
-                # samples from random tiles
-                assetRandomTiles = map(lambda gridName: '{}/{}-{}-{}'.format(ASSET_SAMPLES, gridName, str(yearSample),'5'), gridNamesRandom)
-                assetRandomTiles = list(assetRandomTiles)
 
-                samplesTilesRandom = map(lambda asset: ee.FeatureCollection(asset), assetRandomTiles)
-                samplesTilesRandom = ee.FeatureCollection(list(samplesTilesRandom)).flatten().remap(
-                    CLASS_REMAP[:,0:1].flatten().tolist(), 
-                    CLASS_REMAP[:,1:2].flatten().tolist(),
-                    'class'
-                ).select(['class'])
+                # train samples current tile
+                samplesTileTrain = image.sampleRegions(
+                    collection=samplesTile,  
+                    scale=10
+                )
 
-  
-
-                allSamples = ee.FeatureCollection(samplesTile.merge(samplesTilesRandom))
-                allSamples = shuffle(collection=allSamples)
+                # train samples random images
+                tilesRandom = list(random.choices(TILES, k=3))
+                samplesTilesRandom = trainRandomTileImg(tilesRandom, year)
 
 
+                # get trainning samples
+                #samplesTileFc = ee.FeatureCollection(list(dfReferenceArea['samples_gee'].values)).flatten()
+                #samplesTileFc = samplesTileFc.select(['class'])
+
+
+                # filter samples based on proportion
+                samplesToModel = ee.FeatureCollection(samplesTilesRandom.merge(samplesTileTrain))
+                samplesToModel = shuffle(collection=samplesToModel)
 
                 dfReferenceArea['samples_gee'] = dfReferenceArea.apply(
-                    lambda serie: allSamples.filter(ee.Filter.eq('class', serie['class'])).limit(serie['n_samples']),
+                    lambda serie: samplesToModel.filter(ee.Filter.eq('class', serie['class'])).limit(serie['n_samples']),
                     axis=1
                 )
 
                 # get trainning samples
-                samplesTileFc = ee.FeatureCollection(list(dfReferenceArea['samples_gee'].values)).flatten()
-                samplesTileFc = samplesTileFc.select(['class'])
-
-                #pprint(samplesTileFc.first().getInfo())
-
-                # train samples
-                samplesTileTrain = image.sampleRegions(
-                    collection=samplesTileFc,  
-                    scale=10
-                )
-                
-                #pprint(samplesTileTrain.first().getInfo())
+                samplesToModel = ee.FeatureCollection(list(dfReferenceArea['samples_gee'].values)).flatten()
 
                 # create model
                 model = ee.Classifier.smileRandomForest(**RF_PARAMS)\
-                    .train(samplesTileTrain, 'class', FEAT_SPACE_BANDS)
+                    .train(samplesToModel, 'class', FEAT_SPACE_BANDS)
                 
                 # predict image
                 classification = image.classify(model)
