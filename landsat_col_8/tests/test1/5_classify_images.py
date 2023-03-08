@@ -248,45 +248,37 @@ def getReferenceAreaTable(tile, year):
 
     return referenceTable
 
-def getRandomTileSample(randomTiles: list) -> ee.featurecollection.FeatureCollection:
+def getRandomTileSample(randomTiles: list) -> pd.DataFrame:
+
+    df = pd.DataFrame({
+        "gv":[], 
+        "gvs":[], 
+        "soil":[], 
+        "npv":[], 
+        "ndfi":[], 
+        "csfi":[], 
+        "shade":[],
+        "classification":[],
+        "tile":[],
+        "landsat_id_scene":[],
+        "year":[]
+    })
 
 
-    def _getSamples(tile):
+    for t in randomTiles:
+        p = SUPPORT_SAMPLES.format((year), t)
+        dfSupport = pd.read_csv(os.path.abspath(p))
+        df = pd.concat([df, dfSupport])
 
-        df_filtered = pd.DataFrame({
-            "gv":[], 
-            "gvs":[], 
-            "soil":[], 
-            "npv":[], 
-            "ndfi":[], 
-            "csfi":[], 
-            "shade":[],
-            "classification":[],
-            "tile":[],
-            "landsat_id_scene":[],
-            "year":[]
-        })
 
-        p = SUPPORT_SAMPLES.format((year), tile)
-        dfSupport = pd.read_csv(os.path.abspath(p))\
+    #classes = df['classification'].drop_duplicates().values
+    # filter outliers
+    #for c in classes:
+    #    df_f = df.query('classification == {}'.format(c))
+    #    df_f = df_f[(np.abs(stats.zscore(df_f[["gv", "gvs", "soil", "npv", "ndfi", "csfi", "shade"]])) < 3).all(axis=1)]
+    #    df_outliers = pd.concat([df_outliers, df_f])
 
-        lidImg = dfSupport['landsat_id_scene'].drop_duplicates().values
-        lidImg = random.choices(lidImg, k=5)
-
-        fileTileImgSupport = dfSupport.loc[dfSupport['landsat_id_scene'].isin(lidImg)]
-
-        classes = fileTileImgSupport['classification'].drop_duplicates().values
-
-        # filter outliers
-        for c in classes:
-            df = fileTileImgSupport.query('classification == {}'.format(c))
-            df = df[(np.abs(stats.zscore(df[["gv", "gvs", "soil", "npv", "ndfi", "csfi", "shade"]])) < 3).all(axis=1)]
-            df_filtered = pd.concat([df_filtered, df])
-
-        return tableToFeatureCollection(df_filtered)
-
-    mapRandomList = map(lambda tile: _getSamples(tile), randomTiles)
-    return ee.FeatureCollection(list(mapRandomList)).flatten()
+    return df
 
 def tableToFeatureCollection(table: pd.DataFrame) -> ee.featurecollection.FeatureCollection:
     table = table[FEAT_SPACE_BANDS + ['classification']]
@@ -350,13 +342,7 @@ for year in YEARS:
     prList = TEST_PR # list(fileYear['PR'].drop_duplicates().values)
 
     for tile in prList[:1]:
-        dfSamplesUsed = pd.DataFrame({
-            "gv":[], "gvs":[], "soil":[], "npv":[], "ndfi":[], "csfi":[], "shade":[], 
-            "class":[],
-            "year": [],
-            "tile": [],
-            "landsat_id_scene": []
-        })
+
 
         fileSamplesTile = fileYear.query('PR == {}'.format(tile))
 
@@ -368,6 +354,10 @@ for year in YEARS:
         listIdImages = fileSamplesTile['LANDSAT_SCENE_ID'].drop_duplicates().values
 
         for idImg in listIdImages:
+            dfModel = pd.DataFrame({
+                "gv":[], "gvs":[], "soil":[], "npv":[], "ndfi":[], "csfi":[], "shade":[], 
+                "class":[]
+            })
 
             sensor = idImg[:3]
 
@@ -408,56 +398,57 @@ for year in YEARS:
             samplesTileImageTrain = image.sampleRegions(
                 collection=samplesTileImage,  
                 scale=30
-            )
-
-            # get support samples in current tile
-            pathSupportSp = SUPPORT_SAMPLES.format((year), tile)
-            fileImageSamplesSupport = pd.read_csv(os.path.abspath(pathSupportSp)).query('landsat_id_scene == "{}"'.format(idImg))
-            samplesSupportTileImage = tableToFeatureCollection(fileImageSamplesSupport)
-            
+            )            
 
             # get random support samples
-            randomTiles = random.choices(prList, k=9)
-            samplesSupportRandom = getRandomTileSample(randomTiles)
+            randomTiles = random.choices(prList, k=3)
+            dfRandomTileSample = getRandomTileSample(randomTiles)[FEAT_SPACE_BANDS + ['classification']]
+            dfRandomTileSample = dfRandomTileSample.rename(columns={'classification':'class'})
+            
+            # transform ref table to dict
+            refTableDict = refTableArea[['class', 'n_samples']].to_dict()
+            refTableC = list(dict(refTableDict['class']).values())
+            refTableV = list(dict(refTableDict['n_samples']).values())
+            refTableDict = dict(zip(refTableC, refTableV))
 
-            allSamples = ee.FeatureCollection(samplesSupportRandom.merge(samplesTileImageTrain).merge(samplesSupportTileImage))
-            allSamples = allSamples.filter(ee.Filter.And(
-                ee.Filter.neq('shade', 0),
-                ee.Filter.neq('gv', 0),
-                ee.Filter.neq('gvs', 0),
-                ee.Filter.neq('soil', 0),
-                ee.Filter.neq('ndfi', 0),
-                ee.Filter.neq('csfi', 0)
-            ))
+            # 
+            for k, v in refTableDict.items():
+                dfRandomSelected = dfRandomTileSample.loc[dfRandomTileSample['class'] == k]
+                dfRandomSelected = dfRandomSelected.head(int(v))
+                #pprint(dfRandomSelected)
+                dfModel = pd.concat([dfModel, dfRandomSelected])
 
-            allSamples = shuffle(allSamples)
+            print(dfModel.groupby(by=['class']).count())
 
-            refTableArea['samples_gee'] = refTableArea.apply(
-                lambda serie: allSamples.filter(ee.Filter.eq(
-                    'class', serie['class'])).limit(serie['n_samples']),
-                axis=1
-            )
+            #allSamples = ee.FeatureCollection(samplesSupportRandom.merge(samplesTileImageTrain))
+            #allSamples = shuffle(allSamples)
+
+  
+            #refTableArea['samples_gee'] = refTableArea.apply(
+            #    lambda serie: allSamples.filter(ee.Filter.eq(
+            #        'class', serie['class'])).limit(serie['n_samples']),
+            #    axis=1
+            #)
 
             # get trainning samples
-            samplesToModel = ee.FeatureCollection(list(refTableArea['samples_gee'].values)).flatten()
-
-
+            #samplesToModel = ee.FeatureCollection(list(refTableArea['samples_gee'].values)).flatten()
 
             # save classification samples - generate url
-            urlSamples = samplesToModel.getDownloadURL(selectors=FEAT_SPACE_BANDS + ['class'])
-            r = requests.get(urlSamples, stream=True)
-            if r.status_code != 200:
-                r.raise_for_status()
+            #urlSamples = samplesToModel.getDownloadURL(selectors=FEAT_SPACE_BANDS + ['class'])
+            #r = requests.get(urlSamples, stream=True)
+            #if r.status_code != 200:
+            #    r.raise_for_status()
 
             # save classification samples - create csv
-            descOutSp = 'samples_used_{}_{}.csv'.format(tile, year)
-            dfSupportSamples = pd.read_csv(io.StringIO(r.content.decode('utf-8')))
-            dfSupportSamples['year'] = year
-            dfSupportSamples['tile'] = tile
-            dfSupportSamples['landsat_id_scene'] = idImg
+            #descOutSp = 'samples_used_{}_{}.csv'.format(tile, year)
+            #dfSupportSamples = pd.read_csv(io.StringIO(r.content.decode('utf-8')))
+            #dfSupportSamples['year'] = year
+            #dfSupportSamples['tile'] = tile
+            #dfSupportSamples['landsat_id_scene'] = idImg
 
-            dfSamplesUsed = pd.concat([dfSamplesUsed, dfSupportSamples])
+            #dfSamplesUsed = pd.concat([dfSamplesUsed, dfSupportSamples])
             '''
+            
             # create model
             model = ee.Classifier.smileRandomForest(**RF_PARAMS)\
                 .train(samplesToModel, 'class', FEAT_SPACE_BANDS)
@@ -490,7 +481,8 @@ for year in YEARS:
                 maxPixels=1e13
             )
 
-            #task.start()
-            '''
+            task.start()
 
-        dfSamplesUsed.to_csv(os.path.abspath(OUTPUT_SAMPLES.format(descOutSp)))
+
+            #dfSamplesUsed.to_csv(os.path.abspath(OUTPUT_SAMPLES.format(descOutSp)))
+            '''
