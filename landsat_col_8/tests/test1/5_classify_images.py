@@ -281,14 +281,13 @@ def getRandomTileSample(randomTiles: list) -> pd.DataFrame:
     return df
 
 def tableToFeatureCollection(table: pd.DataFrame) -> ee.featurecollection.FeatureCollection:
-    table = table[FEAT_SPACE_BANDS + ['classification']]
+    table = table[FEAT_SPACE_BANDS + ['class']]
     listOfSuppSp = []
 
     for index, row in table.iterrows():
         listOfSuppSp.append(ee.Feature(None, row.to_dict()))
 
-    return ee.FeatureCollection(listOfSuppSp)\
-        .select(FEAT_SPACE_BANDS + ['classification'], FEAT_SPACE_BANDS + ['class'])
+    return ee.FeatureCollection(listOfSuppSp)
 
 
 def shuffle(collection, seed=1):
@@ -418,28 +417,20 @@ for year in YEARS:
                 #pprint(dfRandomSelected)
                 dfModel = pd.concat([dfModel, dfRandomSelected])
 
-            print(dfModel.groupby(by=['class']).count())
+            samplesSupportRandom = tableToFeatureCollection(dfModel)
 
-            #allSamples = ee.FeatureCollection(samplesSupportRandom.merge(samplesTileImageTrain))
+            allSamples = ee.FeatureCollection(samplesSupportRandom.merge(samplesTileImageTrain))
+
             #allSamples = shuffle(allSamples)
 
-  
-            #refTableArea['samples_gee'] = refTableArea.apply(
-            #    lambda serie: allSamples.filter(ee.Filter.eq(
-            #        'class', serie['class'])).limit(serie['n_samples']),
-            #    axis=1
-            #)
-
-            # get trainning samples
-            #samplesToModel = ee.FeatureCollection(list(refTableArea['samples_gee'].values)).flatten()
 
             # save classification samples - generate url
-            #urlSamples = samplesToModel.getDownloadURL(selectors=FEAT_SPACE_BANDS + ['class'])
+            #urlSamples = allSamples.getDownloadURL(selectors=FEAT_SPACE_BANDS + ['class'])
             #r = requests.get(urlSamples, stream=True)
             #if r.status_code != 200:
             #    r.raise_for_status()
-
-            # save classification samples - create csv
+#
+            ## save classification samples - create csv
             #descOutSp = 'samples_used_{}_{}.csv'.format(tile, year)
             #dfSupportSamples = pd.read_csv(io.StringIO(r.content.decode('utf-8')))
             #dfSupportSamples['year'] = year
@@ -447,11 +438,10 @@ for year in YEARS:
             #dfSupportSamples['landsat_id_scene'] = idImg
 
             #dfSamplesUsed = pd.concat([dfSamplesUsed, dfSupportSamples])
-            '''
-            
+
             # create model
             model = ee.Classifier.smileRandomForest(**RF_PARAMS)\
-                .train(samplesToModel, 'class', FEAT_SPACE_BANDS)
+                .train(allSamples, 'class', FEAT_SPACE_BANDS)
 
             # predict image
             classification = image.classify(model)
@@ -485,4 +475,4 @@ for year in YEARS:
 
 
             #dfSamplesUsed.to_csv(os.path.abspath(OUTPUT_SAMPLES.format(descOutSp)))
-            '''
+        
