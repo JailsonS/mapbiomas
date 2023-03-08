@@ -92,7 +92,7 @@ RF_PARAMS = {
     # 'minLeafPopulation': 25
 }
 
-FEAT_SPACE_BANDS = ["gv", "gvs", "soil", "npv", "ndfi", "csfi"]
+FEAT_SPACE_BANDS = ["gv", "gvs", "soil", "npv", "ndfi", "csfi", "shade"]
     
 
 
@@ -102,12 +102,10 @@ N_SAMPLES = 2000
 PROPORTION_SAMPLES = pd.DataFrame([
     {'class':  3, 'min_samples': N_SAMPLES * 0.40, 'proportion': 0.40},
     {'class':  4, 'min_samples': N_SAMPLES * 0.05, 'proportion': 0.05},
-    {'class': 12, 'min_samples': N_SAMPLES * 0.05, 'proportion': 0.05},
-    {'class': 15, 'min_samples': N_SAMPLES * 0.23, 'proportion': 0.25},
+    {'class': 12, 'min_samples': N_SAMPLES * 0.15, 'proportion': 0.15},
+    {'class': 15, 'min_samples': N_SAMPLES * 0.20, 'proportion': 0.20},
     {'class': 18, 'min_samples': N_SAMPLES * 0.10, 'proportion': 0.10},
-    #{'class': 11, 'min_samples': N_SAMPLES * 0.05, 'proportion': 0.05},
     {'class': 33, 'min_samples': N_SAMPLES * 0.10, 'proportion': 0.10},
-    {'class': 25, 'min_samples': N_SAMPLES * 0.02, 'proportion': 0.05},
 ])
 
 
@@ -124,12 +122,12 @@ TEST_PR = [
   # "224060",
   # "228061",
   # "223062",
-  # "227062",
-  # "224066",
-  # "225066",
-  # "224068",
-  # "231069",
-  # "230069"
+  "227062",
+  "224066",
+  "225066",
+  "224068",
+  "231069",
+  "230069"
 ]
 
 
@@ -240,10 +238,8 @@ def getReferenceAreaTable(tile, year):
         30:25,
         50:3,
         19:18,
-        32:18,
-        20:18,
         41:18,
-        11:12
+        11:33
     }}).groupby(by=['tile', 'year','class']).sum().reset_index()
 
     referenceTable = getProportionTable(referenceTable, int(tile), int(year))

@@ -2,3 +2,4 @@ earthengine-api
 pandas
 geopandas
 mercantile
+scipy

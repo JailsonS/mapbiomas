@@ -3,12 +3,15 @@ import os.path
 import os, io
 import requests, json, random
 import pandas as pd
+import numpy as np
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+
+from scipy import stats
 
 from modules.index import getFractions, getNdfi, getCsfi
 from modules.util import applyScaleFactorsL8L9, removeCloudShadow, removeShadow
@@ -17,15 +20,16 @@ from pprint import pprint
 
 ee.Initialize()
 
-
+pd.options.mode.chained_assignment = None  # default='warn'
 
 '''
     Config Session
 '''
 
 # output info
-OUTPUT_ASSET = ''
-VERSION = '1'
+ASSET_OUTPUT = 'projects/imazon-simex/LULC/COLLECTION8/classification'
+VERSION = '0'
+OUTPUT_SAMPLES = './landsat_col_8/tests/test1/data/classification_samples/{}'
 
 # google drive api
 SCOPES = ['https://www.googleapis.com/auth/drive']
@@ -37,7 +41,6 @@ URL_TOKEN = 'https://oauth2.googleapis.com/token'
 ASSET_PR = 'projects/mapbiomas-workspace/AUXILIAR/landsat-scenes'
 ASSET_BIOMES = 'projects/mapbiomas-workspace/AUXILIAR/biomas-2019'
 ASSET_TILES = 'projects/mapbiomas-workspace/AUXILIAR/landsat-mask'
-ASSET_OUTPUT = ''
 
 
 # table of reference
@@ -66,7 +69,7 @@ LEGEND_NAMES = {
     'INFRAESTRUTURA URBANA': 25, # infra urbana[24] -> outra área não vegetada[25]
     'FORMAÇÃO CAMPESTRE': 12,
     'MINERAÇÃO': 25, # mineração[30] -> outra área não vegetada[25]
-    'FLORESTA INUNDÁVEL': 3, # floresta inundável[x] -> floresta[3]
+    'FLORESTA INUNDÁVEL': 100, # floresta inundável[x] -> floresta[3]
     'AQUICULTURA': 33, # aquicultura[x] -> água[33]
     'FORMAÇÃO SAVÂNICA': 4,
     'VEGETAÇÃO URBANA': 25,
@@ -89,27 +92,24 @@ FIELDS = [
 
 # model parameters
 RF_PARAMS = {
-    'numberOfTrees': 50,
+    'numberOfTrees': 60,
     # 'variablesPerSplit': 4,
     # 'minLeafPopulation': 25
 }
 
-FEAT_SPACE_BANDS = ["gv", "gvs", "soil", "npv", "ndfi", "csfi"]
+FEAT_SPACE_BANDS = ["gv", "gvs", "soil", "npv", "ndfi", "csfi", "shade"]
     
 
-
 # sample balance
-N_SAMPLES = 2000
+N_SAMPLES = 5000
 
 PROPORTION_SAMPLES = pd.DataFrame([
     {'class':  3, 'min_samples': N_SAMPLES * 0.40, 'proportion': 0.40},
     {'class':  4, 'min_samples': N_SAMPLES * 0.05, 'proportion': 0.05},
-    {'class': 12, 'min_samples': N_SAMPLES * 0.05, 'proportion': 0.05},
-    {'class': 15, 'min_samples': N_SAMPLES * 0.23, 'proportion': 0.25},
+    {'class': 12, 'min_samples': N_SAMPLES * 0.15, 'proportion': 0.15},
+    {'class': 15, 'min_samples': N_SAMPLES * 0.20, 'proportion': 0.20},
     {'class': 18, 'min_samples': N_SAMPLES * 0.10, 'proportion': 0.10},
-    #{'class': 11, 'min_samples': N_SAMPLES * 0.05, 'proportion': 0.05},
     {'class': 33, 'min_samples': N_SAMPLES * 0.10, 'proportion': 0.10},
-    {'class': 25, 'min_samples': N_SAMPLES * 0.02, 'proportion': 0.05},
 ])
 
 
@@ -122,16 +122,16 @@ YEARS = [
 ]
 
 TEST_PR = [
-  # "225060",
-  # "224060",
-  # "228061",
+  "225060",
+  "224060",
+  "228061",
   "223062",
-  # "227062",
-  # "224066",
-  # "225066",
-  # "224068",
-  # "231069",
-  # "230069"
+  "227062",
+  "224066",
+  "225066",
+  "224068",
+  "231069",
+  "230069"
 ]
 
 
@@ -202,6 +202,7 @@ def getProportionTable(table: pd.DataFrame, tile: int, year: int) -> pd.DataFram
     # compare to min samples: rule (min_samples > n_samples = min_samples)
     df.loc[df['min_samples'] > df['n_samples'], 'n_samples'] = df['min_samples']
     df = df.replace(float("NaN"), 0)
+    df['n_samples'] = df['n_samples'].astype(int)
 
     return df
 
@@ -234,13 +235,13 @@ def getReferenceAreaTable(tile, year):
     # normalize classes
     referenceTable = referenceTable.replace({'class': {
         9:3,
+        5:3,
         30:25,
         50:3,
         19:18,
-        32:18,
         20:18,
         41:18,
-        11:12
+        11:33
     }}).groupby(by=['tile', 'year','class']).sum().reset_index()
 
     referenceTable = getProportionTable(referenceTable, int(tile), int(year))
@@ -249,17 +250,40 @@ def getReferenceAreaTable(tile, year):
 
 def getRandomTileSample(randomTiles: list) -> ee.featurecollection.FeatureCollection:
 
+
     def _getSamples(tile):
+
+        df_filtered = pd.DataFrame({
+            "gv":[], 
+            "gvs":[], 
+            "soil":[], 
+            "npv":[], 
+            "ndfi":[], 
+            "csfi":[], 
+            "shade":[],
+            "classification":[],
+            "tile":[],
+            "landsat_id_scene":[],
+            "year":[]
+        })
 
         p = SUPPORT_SAMPLES.format((year), tile)
         dfSupport = pd.read_csv(os.path.abspath(p))\
 
-        idImg = dfSupport['landsat_id_scene'].drop_duplicates().values
-        idImg = random.choice(idImg)
+        lidImg = dfSupport['landsat_id_scene'].drop_duplicates().values
+        lidImg = random.choices(lidImg, k=5)
 
-        fileTileImgSupport = dfSupport.query('landsat_id_scene == "{}"'.format(idImg))
+        fileTileImgSupport = dfSupport.loc[dfSupport['landsat_id_scene'].isin(lidImg)]
 
-        return tableToFeatureCollection(fileTileImgSupport)
+        classes = fileTileImgSupport['classification'].drop_duplicates().values
+
+        # filter outliers
+        for c in classes:
+            df = fileTileImgSupport.query('classification == {}'.format(c))
+            df = df[(np.abs(stats.zscore(df[["gv", "gvs", "soil", "npv", "ndfi", "csfi", "shade"]])) < 3).all(axis=1)]
+            df_filtered = pd.concat([df_filtered, df])
+
+        return tableToFeatureCollection(df_filtered)
 
     mapRandomList = map(lambda tile: _getSamples(tile), randomTiles)
     return ee.FeatureCollection(list(mapRandomList)).flatten()
@@ -289,18 +313,18 @@ def shuffle(collection, seed=1):
         )
     )
 
-    #listIdRandom =  collection.reduceColumns(ee.Reducer.toList(), ['new_id']).get('list')
+    listIdRandom = collection.reduceColumns(ee.Reducer.toList(), ['new_id']).get('list')
 
     # list of random ids
-    #randomIdList = ee.List(listIdRandom)
+    randomIdList = ee.List(listIdRandom)
 
     # list of sequential ids
-    #sequentialIdList = ee.List.sequence(1, collection.size())
+    sequentialIdList = ee.List.sequence(1, collection.size())
 
     # set new ids
-    #shuffled = collection.remap(randomIdList, sequentialIdList, 'new_id')
+    shuffled = collection.remap(randomIdList, sequentialIdList, 'new_id')
 
-    return collection
+    return shuffled
 '''
     Input Data
 '''
@@ -325,9 +349,14 @@ for year in YEARS:
 
     prList = TEST_PR # list(fileYear['PR'].drop_duplicates().values)
 
-    for tile in prList:
-
-        pprint(0)
+    for tile in prList[:1]:
+        dfSamplesUsed = pd.DataFrame({
+            "gv":[], "gvs":[], "soil":[], "npv":[], "ndfi":[], "csfi":[], "shade":[], 
+            "class":[],
+            "year": [],
+            "tile": [],
+            "landsat_id_scene": []
+        })
 
         fileSamplesTile = fileYear.query('PR == {}'.format(tile))
 
@@ -362,6 +391,7 @@ for year in YEARS:
             image = getNdfi(image)
             image = getCsfi(image)
             image = removeCloudShadow(image)
+            image = removeShadow(image)
             image = image.select(FEAT_SPACE_BANDS)
 
 
@@ -382,16 +412,24 @@ for year in YEARS:
 
             # get support samples in current tile
             pathSupportSp = SUPPORT_SAMPLES.format((year), tile)
-            fileImageSamplesSupport = pd.read_csv(os.path.abspath(pathSupportSp))\
-                .query('landsat_id_scene == "{}"'.format(idImg))
+            fileImageSamplesSupport = pd.read_csv(os.path.abspath(pathSupportSp)).query('landsat_id_scene == "{}"'.format(idImg))
             samplesSupportTileImage = tableToFeatureCollection(fileImageSamplesSupport)
             
 
             # get random support samples
-            randomIdImages = random.choices(prList, k=15)
-            samplesSupportRandom = getRandomTileSample(randomIdImages)
+            randomTiles = random.choices(prList, k=9)
+            samplesSupportRandom = getRandomTileSample(randomTiles)
 
-            allSamples = ee.FeatureCollection(samplesSupportRandom.merge(samplesSupportTileImage).merge(samplesTileImageTrain))
+            allSamples = ee.FeatureCollection(samplesSupportRandom.merge(samplesTileImageTrain).merge(samplesSupportTileImage))
+            allSamples = allSamples.filter(ee.Filter.And(
+                ee.Filter.neq('shade', 0),
+                ee.Filter.neq('gv', 0),
+                ee.Filter.neq('gvs', 0),
+                ee.Filter.neq('soil', 0),
+                ee.Filter.neq('ndfi', 0),
+                ee.Filter.neq('csfi', 0)
+            ))
+
             allSamples = shuffle(allSamples)
 
             refTableArea['samples_gee'] = refTableArea.apply(
@@ -403,6 +441,23 @@ for year in YEARS:
             # get trainning samples
             samplesToModel = ee.FeatureCollection(list(refTableArea['samples_gee'].values)).flatten()
 
+
+
+            # save classification samples - generate url
+            urlSamples = samplesToModel.getDownloadURL(selectors=FEAT_SPACE_BANDS + ['class'])
+            r = requests.get(urlSamples, stream=True)
+            if r.status_code != 200:
+                r.raise_for_status()
+
+            # save classification samples - create csv
+            descOutSp = 'samples_used_{}_{}.csv'.format(tile, year)
+            dfSupportSamples = pd.read_csv(io.StringIO(r.content.decode('utf-8')))
+            dfSupportSamples['year'] = year
+            dfSupportSamples['tile'] = tile
+            dfSupportSamples['landsat_id_scene'] = idImg
+
+            dfSamplesUsed = pd.concat([dfSamplesUsed, dfSupportSamples])
+            '''
             # create model
             model = ee.Classifier.smileRandomForest(**RF_PARAMS)\
                 .train(samplesToModel, 'class', FEAT_SPACE_BANDS)
@@ -416,10 +471,11 @@ for year in YEARS:
                 .set('version', VERSION)\
                 .set('tile', tile)\
                 .set('year', year)\
-                .set('id_image', idImage)\
+                .set('id_image', idImg)\
+                .set('src', 'IMAZON')\
                 .byte()
 
-            name = '{}_{}_{}_{}_{}'.format(idImg, str(tile), str(year), VERSION)
+            name = '{}_{}_{}_{}'.format(idImg, str(tile), str(year), VERSION)
             assetId = '{}/{}'.format(ASSET_OUTPUT, name)
 
             pprint('Exporting... ' + name)
@@ -429,8 +485,12 @@ for year in YEARS:
                 description=name,
                 assetId=assetId,
                 scale=10,
+                pyramidingPolicy={'.default': 'mode'},
                 region=geometry,
                 maxPixels=1e13
             )
 
-            task.start()
+            #task.start()
+            '''
+
+        dfSamplesUsed.to_csv(os.path.abspath(OUTPUT_SAMPLES.format(descOutSp)))
